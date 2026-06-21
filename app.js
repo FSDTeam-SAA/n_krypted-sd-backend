@@ -1,0 +1,43 @@
+import express from 'express';
+import cors from 'cors';
+import adminRoutes from './routes/admin.routes.js';
+import authRoutes from './routes/auth.routes.js';
+import categoryRoutes from './routes/category.routes.js';
+import dishRoutes from './routes/dish.routes.js';
+import ownerRoutes from './routes/owner.routes.js';
+import pageRoutes from './routes/page.routes.js';
+import restaurantRoutes from './routes/restaurant.routes.js';
+import reviewRoutes from './routes/review.routes.js';
+import savedRoutes from './routes/saved.routes.js';
+import uploadRoutes from './routes/upload.routes.js';
+import notFound from './middlewares/notFound.js';
+import globalErrorHandler from './middlewares/globalErrorHandler.js';
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'n_krypted API is running'
+  });
+});
+
+app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/restaurants', restaurantRoutes);
+app.use('/api/v1/dishes', dishRoutes);
+app.use('/api/v1/categories', categoryRoutes);
+app.use('/api/v1/reviews', reviewRoutes);
+app.use('/api/v1/me/saved', savedRoutes);
+app.use('/api/v1/pages', pageRoutes);
+app.use('/api/v1/owner', ownerRoutes);
+app.use('/api/v1/admin', adminRoutes);
+app.use('/api/v1/uploads', uploadRoutes);
+
+app.use(notFound);
+app.use(globalErrorHandler);
+
+export default app;

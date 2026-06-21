@@ -1,0 +1,41 @@
+import mongoose from 'mongoose';
+
+export const imageSchema = new mongoose.Schema(
+  {
+    public_id: { type: String, required: true },
+    secure_url: { type: String, required: true },
+    width: Number,
+    height: Number,
+    format: String,
+    bytes: Number,
+    alt: String
+  },
+  { _id: true }
+);
+
+export const pointSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number],
+      validate: {
+        validator(value) {
+          return !value.length || value.length === 2;
+        },
+        message: 'Coordinates must be [longitude, latitude]'
+      },
+      default: undefined
+    }
+  },
+  { _id: false }
+);
+
+export const stripPrivateFields = (doc, ret) => {
+  delete ret.passwordHash;
+  delete ret.__v;
+  return ret;
+};
