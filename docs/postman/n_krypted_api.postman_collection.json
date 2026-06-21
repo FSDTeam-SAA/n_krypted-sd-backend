@@ -1,0 +1,707 @@
+{
+  "info": {
+    "name": "n_krypted MVP API",
+    "description": "Modular API documentation for the n_krypted customer app, restaurant-owner app, and admin dashboard screens.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:5000" },
+    { "key": "customer_token", "value": "" },
+    { "key": "owner_token", "value": "" },
+    { "key": "admin_token", "value": "" },
+    { "key": "restaurant_id", "value": "" },
+    { "key": "dish_id", "value": "" },
+    { "key": "review_id", "value": "" },
+    { "key": "user_id", "value": "" },
+    { "key": "gallery_image_id", "value": "" },
+    { "key": "cloudinary_public_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth & Profile",
+      "description": "Login, registration, profile, password, and account deletion screens.",
+      "item": [
+        {
+          "name": "Register Customer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "Creates a customer account for the mobile app.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Customer User\",\n  \"email\": \"customer@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"customer\",\n  \"phone\": \"+8801700000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Register Owner With Pending Restaurant",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "Creates a restaurant-owner account and a restaurant profile with status pending until admin approval.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Owner User\",\n  \"email\": \"owner@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"restaurant_owner\",\n  \"phone\": \"+8801700000001\",\n  \"restaurant\": {\n    \"name\": \"Restaurant JAN\",\n    \"email\": \"restaurant@example.com\",\n    \"phone\": \"+8801700000002\",\n    \"address\": \"Munich, Germany\",\n    \"description\": \"Modern German food\",\n    \"categories\": [\"German\", \"Popular\"],\n    \"priceRange\": \"$$\",\n    \"location\": {\n      \"type\": \"Point\",\n      \"coordinates\": [90.4125, 23.8103]\n    }\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Register First Admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/register",
+            "description": "Creates the first admin account only. Further public admin registrations are blocked.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Admin User\",\n  \"email\": \"admin@example.com\",\n  \"password\": \"password123\",\n  \"role\": \"admin\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "Returns a JWT token. Put it into customer_token, owner_token, or admin_token depending on the account role.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"password\": \"password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get My Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": "Used by customer and owner profile screens. Owner responses include restaurant when present."
+          }
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": "Used by Edit Profile screens. Supports multipart/form-data with avatar file, or JSON without a file.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "name", "type": "text", "value": "Updated Name" },
+                { "key": "phone", "type": "text", "value": "+8801711111111" },
+                { "key": "avatar", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/change-password",
+            "description": "Used by Change Password screens.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"password123\",\n  \"newPassword\": \"newpassword123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Delete My Account",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": "Soft deletes the logged-in account for Account Management and Delete Account screens."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customer - Home/Search/Map",
+      "description": "Home feed, restaurant list, filters, categories, and map screens.",
+      "item": [
+        {
+          "name": "List Restaurants",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/restaurants?page=1&limit=10&search=Restaurant&category=German&minRating=4&sort=rating",
+            "description": "Used by Home, Search, Restaurants, Filter, and Categories screens. Returns active restaurants only."
+          }
+        },
+        {
+          "name": "Nearby Restaurants",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/restaurants/nearby?lat=23.8103&lng=90.4125&radius=5000&page=1&limit=10&category=German&sort=distance",
+            "description": "Used by Map and Track Yourself screens. Uses lat/lng/radius and MongoDB geospatial search."
+          }
+        },
+        {
+          "name": "Categories",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/categories",
+            "description": "Returns restaurant categories, dish categories, and a merged category list."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customer - Restaurant & Dish Details",
+      "description": "Restaurant details, dish details, signature dishes, all dishes, and view tracking.",
+      "item": [
+        {
+          "name": "Restaurant Details",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/restaurants/{{restaurant_id}}",
+            "description": "Used by Restaurants details screen. Includes restaurant, signatureDishes, and dishes."
+          }
+        },
+        {
+          "name": "Restaurant Dishes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/restaurants/{{restaurant_id}}/dishes?page=1&limit=20&signatureOnly=false",
+            "description": "Used by Signature Dishes and All dishes screens."
+          }
+        },
+        {
+          "name": "Dish Details",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/dishes/{{dish_id}}",
+            "description": "Used by Dish details screens. Includes dish, restaurant, and relatedDishes."
+          }
+        },
+        {
+          "name": "Record Restaurant View",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/restaurants/{{restaurant_id}}/views",
+            "description": "Records a profile/detail view for owner Viewers and admin metrics. Auth is optional."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Customer - Saved/Reviews/Check-ins",
+      "description": "Saved list, review list/create, your review, check-in, and engagement flows.",
+      "item": [
+        {
+          "name": "List Reviews",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/reviews?restaurantId={{restaurant_id}}&dishId={{dish_id}}&page=1&limit=10",
+            "description": "Used by Reviews and Dish details screens. dishId is optional."
+          }
+        },
+        {
+          "name": "Create Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/v1/reviews",
+            "description": "Used by Your review screen. Supports multipart/form-data with images files, or JSON with image asset objects. Recalculates ratings.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "restaurantId", "type": "text", "value": "{{restaurant_id}}" },
+                { "key": "dishId", "type": "text", "value": "{{dish_id}}" },
+                { "key": "rating", "type": "text", "value": "5" },
+                { "key": "comment", "type": "text", "value": "Excellent food and service." },
+                { "key": "images", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Saved Items",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/me/saved",
+            "description": "Used by Saved screen."
+          }
+        },
+        {
+          "name": "Save Restaurant",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/me/saved",
+            "description": "Idempotent save action for restaurant heart/bookmark buttons.",
+            "body": { "mode": "raw", "raw": "{\n  \"itemType\": \"restaurant\",\n  \"id\": \"{{restaurant_id}}\"\n}" }
+          }
+        },
+        {
+          "name": "Save Dish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/me/saved",
+            "description": "Idempotent save action for dish heart/bookmark buttons.",
+            "body": { "mode": "raw", "raw": "{\n  \"itemType\": \"dish\",\n  \"id\": \"{{dish_id}}\"\n}" }
+          }
+        },
+        {
+          "name": "Remove Saved Item",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/me/saved/restaurant/{{restaurant_id}}",
+            "description": "Use /restaurant/:id or /dish/:id depending on item type."
+          }
+        },
+        {
+          "name": "Create Check-in",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/restaurants/{{restaurant_id}}/check-ins",
+            "description": "Used by Check in and Track Yourself screens.",
+            "body": { "mode": "raw", "raw": "{\n  \"lat\": 23.8103,\n  \"lng\": 90.4125\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Restaurant Owner",
+      "description": "Owner home, profile, inside places, dishes, reviews, viewers, check-ins, and rating analytics screens.",
+      "item": [
+        {
+          "name": "Owner Dashboard",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/dashboard",
+            "description": "Used by owner Home screen."
+          }
+        },
+        {
+          "name": "Create Restaurant Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/owner/restaurant",
+            "description": "Creates a pending restaurant profile when the owner did not provide one during registration.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Restaurant JAN\",\n  \"email\": \"restaurant@example.com\",\n  \"phone\": \"+8801700000002\",\n  \"address\": \"Munich, Germany\",\n  \"description\": \"Modern German food\",\n  \"categories\": [\"German\"],\n  \"location\": {\n    \"type\": \"Point\",\n    \"coordinates\": [90.4125, 23.8103]\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Get Owner Restaurant",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/restaurant",
+            "description": "Used by owner profile and restaurant details editing screens."
+          }
+        },
+        {
+          "name": "Update Owner Restaurant",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/owner/restaurant",
+            "description": "Updates owner restaurant details, location, categories, and opening hours.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Restaurant JAN\",\n  \"address\": \"Munich, Germany\",\n  \"categories\": [\"German\", \"Signature\"],\n  \"openingHours\": [\n    { \"day\": \"Monday\", \"open\": \"09:00\", \"close\": \"21:00\" }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Upload Restaurant Gallery",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/v1/owner/restaurant/gallery",
+            "description": "Used by Inside places screens. Send multipart form-data with one or more images under key images.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "images", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Restaurant Gallery Image",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/owner/restaurant/gallery/{{gallery_image_id}}",
+            "description": "Deletes a gallery item from the restaurant and Cloudinary."
+          }
+        },
+        {
+          "name": "List Owner Dishes",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/dishes?page=1&limit=20&search=Schnitzel",
+            "description": "Used by Signature Dishes, All dishes, and dish management screens."
+          }
+        },
+        {
+          "name": "Create Owner Dish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/api/v1/owner/dishes",
+            "description": "Used by add/edit dish screens. Supports multipart/form-data with images files, or JSON with image asset objects.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "name", "type": "text", "value": "Schnitzel" },
+                { "key": "description", "type": "text", "value": "Crispy signature dish" },
+                { "key": "price", "type": "text", "value": "15.45" },
+                { "key": "category", "type": "text", "value": "Main" },
+                { "key": "ingredients", "type": "text", "value": "Chicken,Breadcrumbs" },
+                { "key": "preparationMethod", "type": "text", "value": "Pan-fried until golden." },
+                { "key": "isSignature", "type": "text", "value": "true" },
+                { "key": "status", "type": "text", "value": "active" },
+                { "key": "images", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Owner Dish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/dishes/{{dish_id}}",
+            "description": "Used by owner dish detail/edit screens."
+          }
+        },
+        {
+          "name": "Update Owner Dish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [],
+            "url": "{{base_url}}/api/v1/owner/dishes/{{dish_id}}",
+            "description": "Updates only the authenticated owner's own dish. If images files are sent, they replace the dish images.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "price", "type": "text", "value": "16.45" },
+                { "key": "isSignature", "type": "text", "value": "true" },
+                { "key": "status", "type": "text", "value": "active" },
+                { "key": "images", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Owner Dish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/owner/dishes/{{dish_id}}",
+            "description": "Soft deletes the owner dish."
+          }
+        },
+        {
+          "name": "Owner Reviews",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/reviews?page=1&limit=10",
+            "description": "Used by owner Reviews screen."
+          }
+        },
+        {
+          "name": "Owner Viewers",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/viewers?page=1&limit=10",
+            "description": "Used by Viewers screen."
+          }
+        },
+        {
+          "name": "Owner Check-ins",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/check-ins?page=1&limit=10",
+            "description": "Used by Check in screen."
+          }
+        },
+        {
+          "name": "Owner Ratings Summary",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/owner/ratings-summary",
+            "description": "Used by Average ratings screen."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Dashboard",
+      "description": "Dashboard overview and admin settings screens.",
+      "item": [
+        {
+          "name": "Dashboard Overview",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/dashboard",
+            "description": "Returns totals, active restaurant percentage, chart data, top reviews, and recent restaurants."
+          }
+        },
+        {
+          "name": "Get Admin Settings Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/settings/profile",
+            "description": "Used by Settings screen."
+          }
+        },
+        {
+          "name": "Update Admin Settings Profile",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [],
+            "url": "{{base_url}}/api/v1/admin/settings/profile",
+            "description": "Used by Settings-1 and Settings-2 screens. Supports multipart/form-data with avatar file, or JSON without a file.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "name", "type": "text", "value": "Admin User" },
+                { "key": "phone", "type": "text", "value": "+8801700000000" },
+                { "key": "avatar", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Admin Password",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/settings/password",
+            "description": "Used by Settings-3 screen.",
+            "body": { "mode": "raw", "raw": "{\n  \"currentPassword\": \"password123\",\n  \"newPassword\": \"newpassword123\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin Management",
+      "description": "User management, restaurant management, restaurant details, dish details, and review moderation screens.",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/users?page=1&limit=10&search=Jenny&role=customer",
+            "description": "Used by User Management screen."
+          }
+        },
+        {
+          "name": "User Details",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/users/{{user_id}}",
+            "description": "Used by User details screen."
+          }
+        },
+        {
+          "name": "Update User Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/users/{{user_id}}/status",
+            "description": "Blocks, activates, or soft deletes a user.",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"blocked\"\n}" }
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/admin/users/{{user_id}}",
+            "description": "Soft deletes a user."
+          }
+        },
+        {
+          "name": "List Restaurants",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/restaurants?page=1&limit=10&search=Restaurant&status=pending",
+            "description": "Used by Restaurants Managements screen."
+          }
+        },
+        {
+          "name": "Restaurant Details",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/restaurants/{{restaurant_id}}",
+            "description": "Used by admin Restaurants Details and Dish details screens."
+          }
+        },
+        {
+          "name": "Update Restaurant Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/restaurants/{{restaurant_id}}/status",
+            "description": "Approves pending owner restaurants by setting status active.",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"active\"\n}" }
+          }
+        },
+        {
+          "name": "Delete Restaurant",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/admin/restaurants/{{restaurant_id}}",
+            "description": "Soft deletes restaurant and its dishes."
+          }
+        },
+        {
+          "name": "List Admin Reviews",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/reviews?page=1&limit=10&restaurantId={{restaurant_id}}&status=active",
+            "description": "Used by admin Reviews screen."
+          }
+        },
+        {
+          "name": "Update Review Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/reviews/{{review_id}}/status",
+            "description": "Hides, restores, or soft deletes a review and recalculates ratings.",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"hidden\"\n}" }
+          }
+        },
+        {
+          "name": "Delete Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/admin/reviews/{{review_id}}",
+            "description": "Soft deletes a review."
+          }
+        },
+        {
+          "name": "Update Static Page",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/pages/terms",
+            "description": "Use slug terms or privacy. Used by admin content/settings management.",
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Terms of condition\",\n  \"content\": \"Page content shown in the mobile app.\"\n}" }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Uploads",
+      "description": "Shared Cloudinary upload helpers.",
+      "item": [
+        {
+          "name": "Upload Single Image",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/uploads",
+            "description": "Returns a Cloudinary image asset object usable in avatar, gallery, dish images, or review images.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "image", "type": "file", "src": "" },
+                { "key": "folder", "type": "text", "value": "n-krypted/uploads" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Upload Multiple Images",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/uploads/multiple",
+            "description": "Uploads multiple files under form-data key images.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "images", "type": "file", "src": "" },
+                { "key": "folder", "type": "text", "value": "n-krypted/uploads" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Uploaded Image",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/uploads?publicId={{cloudinary_public_id}}",
+            "description": "Deletes an image from Cloudinary by public_id. Query form is safest when public_id contains slashes."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Static Pages",
+      "description": "Terms and privacy screens.",
+      "item": [
+        {
+          "name": "Get Terms",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/pages/terms",
+            "description": "Used by Terms of condition screens."
+          }
+        },
+        {
+          "name": "Get Privacy Policy",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/pages/privacy",
+            "description": "Used by Privacy policy screens."
+          }
+        }
+      ]
+    }
+  ]
+}
