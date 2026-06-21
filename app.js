@@ -12,6 +12,7 @@ import savedRoutes from './routes/saved.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
 import notFound from './middlewares/notFound.js';
 import globalErrorHandler from './middlewares/globalErrorHandler.js';
+import { getBilingualMessage } from './utils/messages.js';
 
 const app = express();
 
@@ -20,9 +21,12 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 app.get('/', (req, res) => {
+  const message = getBilingualMessage('n_krypted API is running');
+
   res.status(200).json({
     success: true,
-    message: 'n_krypted API is running'
+    message: message.de,
+    messageEn: message.en
   });
 });
 
