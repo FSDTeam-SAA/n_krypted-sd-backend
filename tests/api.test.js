@@ -30,6 +30,14 @@ afterAll(async () => {
 });
 
 describe('n_krypted MVP API', () => {
+  it('returns German primary messages with English companion messages', async () => {
+    const health = await request(app).get('/');
+
+    expect(health.status).toBe(200);
+    expect(health.body.message).toBe('n_krypted API läuft');
+    expect(health.body.messageEn).toBe('n_krypted API is running');
+  });
+
   it('registers admin, owner with pending restaurant, and customer accounts', async () => {
     const admin = await request(app).post('/api/v1/auth/register').send({
       name: 'Admin User',
@@ -39,6 +47,8 @@ describe('n_krypted MVP API', () => {
     });
 
     expect(admin.status).toBe(201);
+    expect(admin.body.message).toBe('Registrierung erfolgreich');
+    expect(admin.body.messageEn).toBe('Registration successful');
     adminToken = admin.body.data.token;
 
     const owner = await request(app).post('/api/v1/auth/register').send({

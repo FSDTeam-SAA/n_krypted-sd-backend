@@ -1,4 +1,5 @@
 import { StatusCodes } from 'http-status-codes';
+import { getBilingualMessage } from '../utils/messages.js';
 
 const globalErrorHandler = (err, req, res, next) => {
   let statusCode = err.statusCode || StatusCodes.INTERNAL_SERVER_ERROR;
@@ -29,9 +30,12 @@ const globalErrorHandler = (err, req, res, next) => {
     message = Object.values(err.errors).map((error) => error.message).join(', ');
   }
 
+  const bilingualMessage = getBilingualMessage(message);
+
   res.status(statusCode).json({
     success: false,
-    message,
+    message: bilingualMessage.de,
+    messageEn: bilingualMessage.en,
     ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
   });
 };

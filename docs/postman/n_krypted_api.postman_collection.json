@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "n_krypted MVP API",
-    "description": "Modular API documentation for the n_krypted customer app, restaurant-owner app, and admin dashboard screens.",
+    "description": "Modular API documentation for the n_krypted customer app, restaurant-owner app, and admin dashboard screens. All responses return German in message for frontend display and English in messageEn for developer/debug clarity.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
