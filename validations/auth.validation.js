@@ -31,6 +31,33 @@ export const loginSchema = {
   })
 };
 
+export const emailSchema = {
+  body: z.object({
+    email: z.string().email()
+  })
+};
+
+export const verifyOtpSchema = {
+  body: z.object({
+    email: z.string().email(),
+    otp: z.string().regex(/^\d{6}$/)
+  })
+};
+
+export const refreshTokenSchema = {
+  body: z.object({
+    refreshToken: z.string().min(1)
+  })
+};
+
+export const resetPasswordSchema = {
+  body: z.object({
+    email: z.string().email(),
+    resetToken: z.string().min(1),
+    newPassword: z.string().min(6)
+  })
+};
+
 export const updateMeSchema = {
   body: z.object({
     name: z.string().min(1).optional(),

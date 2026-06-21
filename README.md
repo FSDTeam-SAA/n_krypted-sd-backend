@@ -28,6 +28,14 @@ NODE_ENV=development
 MONGODB_URI=mongodb://127.0.0.1:27017/n_krypted
 JWT_SECRET=REMOVED_SECRET
 JWT_EXPIRES_IN=7d
+ACCESS_TOKEN_SECRET=REMOVED_SECRET
+ACCESS_TOKEN_EXPIRES_IN=15m
+REFRESH_TOKEN_SECRET=REMOVED_SECRET
+REFRESH_TOKEN_EXPIRES_IN=30d
+OTP_EXPIRES_IN_MINUTES=10
+PASSWORD_RESET_TOKEN_EXPIRES_IN_MINUTES=15
+GMAIL_SMTP_USER=your_gmail_address@gmail.com
+GMAIL_SMTP_APP_PASSWORD=your_gmail_app_password
 CLOUDINARY_CLOUD_NAME=your_cloud_name
 CLOUDINARY_API_KEY=your_api_key
 CLOUDINARY_API_SECRET=your_api_secret
@@ -36,21 +44,38 @@ CLOUDINARY_API_SECRET=your_api_secret
 ## Main API Areas
 
 - `POST /api/v1/auth/register`
+- `POST /api/v1/auth/verify-email`
+- `POST /api/v1/auth/resend-verification-otp`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh-token`
+- `POST /api/v1/auth/forgot-password`
+- `POST /api/v1/auth/verify-password-reset-otp`
+- `POST /api/v1/auth/reset-password`
+- `POST /api/v1/auth/logout`
 - `GET /api/v1/restaurants`
 - `GET /api/v1/restaurants/nearby`
 - `GET /api/v1/restaurants/:id`
 - `GET /api/v1/dishes/:id`
 - `GET /api/v1/reviews`
 - `POST /api/v1/reviews`
+- `GET /api/v1/me/reviews`
+- `PATCH /api/v1/reviews/:id`
+- `DELETE /api/v1/reviews/:id`
 - `GET /api/v1/me/saved`
 - `GET /api/v1/owner/dashboard`
 - `GET /api/v1/owner/restaurant`
+- `PATCH /api/v1/owner/restaurant/gallery/reorder`
 - `GET /api/v1/owner/dishes`
 - `GET /api/v1/admin/dashboard`
 - `GET /api/v1/admin/users`
 - `GET /api/v1/admin/restaurants`
+- `GET /api/v1/admin/dishes/:id`
+- `PATCH /api/v1/admin/dishes/:id/status`
+- `DELETE /api/v1/admin/dishes/:id`
 - `GET /api/v1/admin/reviews`
+- `POST /api/v1/admin/reviews/sd`
+- `PATCH /api/v1/admin/reviews/:id`
+- `PATCH /api/v1/admin/reviews/:id/override`
 
 See `docs/postman/n_krypted_api.postman_collection.json` for modular request documentation with sample bodies.
 
@@ -68,6 +93,50 @@ All API responses return German as the primary display message and English as a 
 ```
 
 Frontend should display `message` to users. Developers can use `messageEn` for debugging or support.
+
+## Auth, OTP, and Tokens
+
+- Register creates the user and sends a 6-digit OTP to the user's email.
+- `POST /api/v1/auth/verify-email` verifies the signup OTP and returns `accessToken`, `refreshToken`, and `token` where `token` is an alias of `accessToken`.
+- Login requires verified email and returns a short-lived access token plus a long-lived refresh token.
+- Frontend sends access token as `Authorization: Bearer <accessToken>`.
+- `POST /api/v1/auth/refresh-token` rotates the refresh token and returns a new access/refresh pair. The frontend should replace both stored tokens.
+- Forgot password flow: `forgot-password` sends OTP, `verify-password-reset-otp` returns a short-lived `resetToken`, and `reset-password` sets the new password.
+- Gmail SMTP is used through `GMAIL_SMTP_USER` and `GMAIL_SMTP_APP_PASSWORD`. Use a Gmail App Password, not the normal Gmail account password.
+
+## Customer Search Filters
+
+Restaurant list and nearby search support:
+
+- `search`
+- `category`
+- `priceRange`
+- `district`
+- `openNow=true|false`
+- `minRating`
+- `sort=rating|popular|newest` for list
+- `sort=distance|rating|popular` for nearby
+- `lat`, `lng`, `radius` for nearby
+
+## Reviews
+
+There are two review types:
+
+- `customer`: created by customers after they check in to a restaurant.
+- `sd_admin`: created by admin as an SD/editorial review.
+
+Customer review rules:
+
+- Customer must call `POST /api/v1/restaurants/:id/check-ins` before `POST /api/v1/reviews`.
+- Customer can list/edit/delete only their own customer reviews.
+- Customer rating aggregates only use active `customer` reviews.
+
+Admin review rules:
+
+- `GET /api/v1/admin/reviews` returns both customer and SD reviews; filter with `reviewType=customer` or `reviewType=sd_admin`.
+- `POST /api/v1/admin/reviews/sd` creates an SD/admin review.
+- `PATCH /api/v1/admin/reviews/:id` lets admin edit any review.
+- `PATCH /api/v1/admin/reviews/:id/override` explicitly overrides a customer review and stores `originalReview`, `overriddenBy`, `overriddenAt`, and `overrideReason`.
 
 ## Image/Form-data Policy
 

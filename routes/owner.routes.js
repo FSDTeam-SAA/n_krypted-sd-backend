@@ -16,6 +16,7 @@ import {
   listOwnerDishes,
   listOwnerReviews,
   listOwnerViewers,
+  reorderRestaurantGallery,
   updateOwnerDish,
   updateOwnerRestaurant,
   uploadRestaurantGallery
@@ -25,6 +26,7 @@ import {
   createOwnerRestaurantSchema,
   listOwnerDishesSchema,
   ownerDishIdSchema,
+  reorderGallerySchema,
   updateOwnerDishSchema,
   updateOwnerRestaurantSchema
 } from '../validations/owner.validation.js';
@@ -39,6 +41,7 @@ router.post('/restaurant', validate(createOwnerRestaurantSchema), createOwnerRes
 router.get('/restaurant', getOwnerRestaurant);
 router.patch('/restaurant', validate(updateOwnerRestaurantSchema), updateOwnerRestaurant);
 router.post('/restaurant/gallery', upload.array('images', 10), uploadRestaurantGallery);
+router.patch('/restaurant/gallery/reorder', validate(reorderGallerySchema), reorderRestaurantGallery);
 router.delete('/restaurant/gallery/:id', validate({ params: idParam }), deleteRestaurantGalleryImage);
 
 router.get('/dishes', validate(listOwnerDishesSchema), listOwnerDishes);

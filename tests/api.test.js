@@ -7,6 +7,7 @@ let mongoServer;
 let adminToken;
 let ownerToken;
 let customerToken;
+let customerRefreshToken;
 let ownerId;
 let customerId;
 let restaurantId;
@@ -38,7 +39,15 @@ describe('n_krypted MVP API', () => {
     expect(health.body.messageEn).toBe('n_krypted API is running');
   });
 
-  it('registers admin, owner with pending restaurant, and customer accounts', async () => {
+  const verifyRegisteredUser = async (email, otp) => {
+    const verification = await request(app).post('/api/v1/auth/verify-email').send({ email, otp });
+    expect(verification.status).toBe(200);
+    expect(verification.body.data.accessToken).toBeTruthy();
+    expect(verification.body.data.refreshToken).toBeTruthy();
+    return verification.body.data;
+  };
+
+  it('registers admin, owner with pending restaurant, and customer accounts with OTP verification', async () => {
     const admin = await request(app).post('/api/v1/auth/register').send({
       name: 'Admin User',
       email: 'admin@example.com',
@@ -47,9 +56,10 @@ describe('n_krypted MVP API', () => {
     });
 
     expect(admin.status).toBe(201);
-    expect(admin.body.message).toBe('Registrierung erfolgreich');
-    expect(admin.body.messageEn).toBe('Registration successful');
-    adminToken = admin.body.data.token;
+    expect(admin.body.message).toBe('Registrierung erfolgreich. Bitte bestätigen Sie Ihre E-Mail-Adresse');
+    expect(admin.body.messageEn).toBe('Registration successful. Please verify your email');
+    const verifiedAdmin = await verifyRegisteredUser('admin@example.com', admin.body.data.otp.devOtp);
+    adminToken = verifiedAdmin.accessToken;
 
     const owner = await request(app).post('/api/v1/auth/register').send({
       name: 'Owner User',
@@ -72,10 +82,11 @@ describe('n_krypted MVP API', () => {
     });
 
     expect(owner.status).toBe(201);
-    ownerToken = owner.body.data.token;
     ownerId = owner.body.data.user._id;
     restaurantId = owner.body.data.restaurant._id;
     expect(owner.body.data.restaurant.status).toBe('pending');
+    const verifiedOwner = await verifyRegisteredUser('owner@example.com', owner.body.data.otp.devOtp);
+    ownerToken = verifiedOwner.accessToken;
 
     const customer = await request(app).post('/api/v1/auth/register').send({
       name: 'Customer User',
@@ -85,8 +96,53 @@ describe('n_krypted MVP API', () => {
     });
 
     expect(customer.status).toBe(201);
-    customerToken = customer.body.data.token;
     customerId = customer.body.data.user._id;
+    const verifiedCustomer = await verifyRegisteredUser('customer@example.com', customer.body.data.otp.devOtp);
+    customerToken = verifiedCustomer.accessToken;
+    customerRefreshToken = verifiedCustomer.refreshToken;
+  });
+
+  it('refreshes access tokens and supports forgot-password OTP reset', async () => {
+    const refresh = await request(app).post('/api/v1/auth/refresh-token').send({
+      refreshToken: customerRefreshToken
+    });
+
+    expect(refresh.status).toBe(200);
+    expect(refresh.body.data.accessToken).toBeTruthy();
+    expect(refresh.body.data.refreshToken).toBeTruthy();
+    customerToken = refresh.body.data.accessToken;
+
+    const forgot = await request(app).post('/api/v1/auth/forgot-password').send({
+      email: 'customer@example.com'
+    });
+
+    expect(forgot.status).toBe(200);
+    expect(forgot.body.data.otp.devOtp).toMatch(/^\d{6}$/);
+
+    const verifiedReset = await request(app).post('/api/v1/auth/verify-password-reset-otp').send({
+      email: 'customer@example.com',
+      otp: forgot.body.data.otp.devOtp
+    });
+
+    expect(verifiedReset.status).toBe(200);
+    expect(verifiedReset.body.data.resetToken).toBeTruthy();
+
+    const reset = await request(app).post('/api/v1/auth/reset-password').send({
+      email: 'customer@example.com',
+      resetToken: verifiedReset.body.data.resetToken,
+      newPassword: 'newpassword123'
+    });
+
+    expect(reset.status).toBe(200);
+
+    const login = await request(app).post('/api/v1/auth/login').send({
+      email: 'customer@example.com',
+      password: 'newpassword123'
+    });
+
+    expect(login.status).toBe(200);
+    customerToken = login.body.data.accessToken;
+    customerRefreshToken = login.body.data.refreshToken;
   });
 
   it('lets the owner create dishes before admin approval', async () => {
@@ -136,6 +192,20 @@ describe('n_krypted MVP API', () => {
 
     expect(saved.status).toBe(200);
 
+    const restaurantList = await request(app)
+      .get('/api/v1/restaurants')
+      .set('Authorization', `Bearer ${customerToken}`);
+
+    expect(restaurantList.status).toBe(200);
+    expect(restaurantList.body.data.restaurants[0].isSaved).toBe(true);
+
+    const checkIn = await request(app)
+      .post(`/api/v1/restaurants/${restaurantId}/check-ins`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ lat: 23.8103, lng: 90.4125 });
+
+    expect(checkIn.status).toBe(201);
+
     const review = await request(app)
       .post('/api/v1/reviews')
       .set('Authorization', `Bearer ${customerToken}`)
@@ -149,12 +219,30 @@ describe('n_krypted MVP API', () => {
     expect(review.status).toBe(201);
     reviewId = review.body.data.review._id;
 
-    const checkIn = await request(app)
-      .post(`/api/v1/restaurants/${restaurantId}/check-ins`)
-      .set('Authorization', `Bearer ${customerToken}`)
-      .send({ lat: 23.8103, lng: 90.4125 });
+    const myReviews = await request(app)
+      .get('/api/v1/me/reviews')
+      .set('Authorization', `Bearer ${customerToken}`);
 
-    expect(checkIn.status).toBe(201);
+    expect(myReviews.status).toBe(200);
+    expect(myReviews.body.data.reviews).toHaveLength(1);
+
+    const updatedReview = await request(app)
+      .patch(`/api/v1/reviews/${reviewId}`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({
+        rating: 4,
+        comment: 'Updated review text'
+      });
+
+    expect(updatedReview.status).toBe(200);
+    expect(updatedReview.body.data.review.rating).toBe(4);
+
+    const dishDetails = await request(app)
+      .get(`/api/v1/dishes/${dishId}`)
+      .set('Authorization', `Bearer ${customerToken}`);
+
+    expect(dishDetails.status).toBe(200);
+    expect(dishDetails.body.data.dish.isSaved).toBe(false);
 
     const view = await request(app)
       .post(`/api/v1/restaurants/${restaurantId}/views`)
@@ -178,9 +266,57 @@ describe('n_krypted MVP API', () => {
 
     expect(adminDashboard.status).toBe(200);
     expect(adminDashboard.body.data.totals.restaurants).toBe(1);
+
+    const adminDish = await request(app)
+      .get(`/api/v1/admin/dishes/${dishId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(adminDish.status).toBe(200);
+    expect(adminDish.body.data.dish._id).toBe(dishId);
+
+    const adminDishStatus = await request(app)
+      .patch(`/api/v1/admin/dishes/${dishId}/status`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'active' });
+
+    expect(adminDishStatus.status).toBe(200);
+    expect(adminDishStatus.body.data.dish.status).toBe('active');
   });
 
   it('lets admin moderate reviews and manage static pages', async () => {
+    const sdReview = await request(app)
+      .post('/api/v1/admin/reviews/sd')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        restaurantId,
+        dishId,
+        rating: 5,
+        comment: 'SD editorial review'
+      });
+
+    expect(sdReview.status).toBe(201);
+    expect(sdReview.body.data.review.reviewType).toBe('sd_admin');
+
+    const overriddenReview = await request(app)
+      .patch(`/api/v1/admin/reviews/${reviewId}/override`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        rating: 3,
+        comment: 'Admin adjusted customer review',
+        overrideReason: 'Moderation correction'
+      });
+
+    expect(overriddenReview.status).toBe(200);
+    expect(overriddenReview.body.data.review.overriddenBy).toBeTruthy();
+    expect(overriddenReview.body.data.review.originalReview.rating).toBe(4);
+
+    const sdReviews = await request(app)
+      .get('/api/v1/admin/reviews?reviewType=sd_admin')
+      .set('Authorization', `Bearer ${adminToken}`);
+
+    expect(sdReviews.status).toBe(200);
+    expect(sdReviews.body.data.reviews).toHaveLength(1);
+
     const hiddenReview = await request(app)
       .patch(`/api/v1/admin/reviews/${reviewId}/status`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -230,7 +366,7 @@ describe('n_krypted MVP API', () => {
       .set('Authorization', `Bearer ${ownerToken}`);
 
     expect(ownerDashboard.status).toBe(200);
-    expect(ownerDashboard.body.data.metrics.totalReviews).toBe(0);
+    expect(ownerDashboard.body.data.metrics.totalReviews).toBe(1);
 
     const deletedOwner = await request(app)
       .delete(`/api/v1/admin/users/${ownerId}`)

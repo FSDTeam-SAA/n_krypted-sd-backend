@@ -7,8 +7,13 @@
   "variable": [
     { "key": "base_url", "value": "http://localhost:5000" },
     { "key": "customer_token", "value": "" },
+    { "key": "customer_refresh_token", "value": "" },
     { "key": "owner_token", "value": "" },
+    { "key": "owner_refresh_token", "value": "" },
     { "key": "admin_token", "value": "" },
+    { "key": "admin_refresh_token", "value": "" },
+    { "key": "otp", "value": "" },
+    { "key": "reset_token", "value": "" },
     { "key": "restaurant_id", "value": "" },
     { "key": "dish_id", "value": "" },
     { "key": "review_id", "value": "" },
@@ -19,7 +24,7 @@
   "item": [
     {
       "name": "Auth & Profile",
-      "description": "Login, registration, profile, password, and account deletion screens.",
+      "description": "Onboarding, sign up, OTP verification, sign in, access/refresh token, forgot password, profile, password, and account deletion screens. Store accessToken in *_token variables and refreshToken in *_refresh_token variables.",
       "item": [
         {
           "name": "Register Customer",
@@ -66,10 +71,88 @@
             "method": "POST",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "url": "{{base_url}}/api/v1/auth/login",
-            "description": "Returns a JWT token. Put it into customer_token, owner_token, or admin_token depending on the account role.",
+            "description": "Sign in screen. Requires verified email. Returns accessToken/token and refreshToken. Store accessToken in customer_token, owner_token, or admin_token depending on role.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"customer@example.com\",\n  \"password\": \"password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify Signup OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/verify-email",
+            "description": "OTP screen after sign up. Verifies email and returns accessToken/token plus refreshToken.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"otp\": \"{{otp}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Resend Signup OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/resend-verification-otp",
+            "description": "Resends the email verification OTP for the sign-up OTP screen.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Refresh Access Token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/refresh-token",
+            "description": "Uses refreshToken to rotate and return a new accessToken/token plus new refreshToken. Frontend should replace both stored tokens.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{customer_refresh_token}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Forgot Password - Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/forgot-password",
+            "description": "Forgot Password screen. Sends OTP to email through Gmail SMTP.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Forgot Password - Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/verify-password-reset-otp",
+            "description": "OTP screen for forgot password. Returns resetToken for the Change password screen.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"otp\": \"{{otp}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Forgot Password - Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/auth/reset-password",
+            "description": "Change password screen after forgot-password OTP verification. Clears old refresh token sessions.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer@example.com\",\n  \"resetToken\": \"{{reset_token}}\",\n  \"newPassword\": \"newpassword123\"\n}"
             }
           }
         },
@@ -107,11 +190,20 @@
             "method": "PATCH",
             "header": [{ "key": "Content-Type", "value": "application/json" }],
             "url": "{{base_url}}/api/v1/auth/change-password",
-            "description": "Used by Change Password screens.",
+            "description": "Used by logged-in Change Password screens. Clears old refresh token sessions after password change.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"currentPassword\": \"password123\",\n  \"newPassword\": \"newpassword123\"\n}"
             }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": "Clears the stored refresh token for the current user. Frontend should also remove local access/refresh tokens."
           }
         },
         {
@@ -133,16 +225,16 @@
           "name": "List Restaurants",
           "request": {
             "method": "GET",
-            "url": "{{base_url}}/api/v1/restaurants?page=1&limit=10&search=Restaurant&category=German&minRating=4&sort=rating",
-            "description": "Used by Home, Search, Restaurants, Filter, and Categories screens. Returns active restaurants only."
+            "url": "{{base_url}}/api/v1/restaurants?page=1&limit=10&search=Restaurant&category=German&priceRange=$$&district=Munich&openNow=false&minRating=4&sort=rating",
+            "description": "Used by Home, Search, Restaurants, Filter, and Categories screens. Returns active restaurants only. If bearer token is sent, restaurants include isSaved."
           }
         },
         {
           "name": "Nearby Restaurants",
           "request": {
             "method": "GET",
-            "url": "{{base_url}}/api/v1/restaurants/nearby?lat=23.8103&lng=90.4125&radius=5000&page=1&limit=10&category=German&sort=distance",
-            "description": "Used by Map and Track Yourself screens. Uses lat/lng/radius and MongoDB geospatial search."
+            "url": "{{base_url}}/api/v1/restaurants/nearby?lat=23.8103&lng=90.4125&radius=5000&page=1&limit=10&category=German&priceRange=$$&district=Munich&openNow=false&sort=distance",
+            "description": "Used by Map and Track Yourself screens. Uses lat/lng/radius and MongoDB geospatial search. If bearer token is sent, restaurants include isSaved."
           }
         },
         {
@@ -164,7 +256,7 @@
           "request": {
             "method": "GET",
             "url": "{{base_url}}/api/v1/restaurants/{{restaurant_id}}",
-            "description": "Used by Restaurants details screen. Includes restaurant, signatureDishes, and dishes."
+            "description": "Used by Restaurants details screen. Includes restaurant, signatureDishes, and dishes. If bearer token is sent, restaurant/dishes include isSaved."
           }
         },
         {
@@ -180,7 +272,7 @@
           "request": {
             "method": "GET",
             "url": "{{base_url}}/api/v1/dishes/{{dish_id}}",
-            "description": "Used by Dish details screens. Includes dish, restaurant, and relatedDishes."
+            "description": "Used by Dish details screens. Includes dish, restaurant, and relatedDishes. If bearer token is sent, dish/restaurant include isSaved."
           }
         },
         {
@@ -202,8 +294,17 @@
           "name": "List Reviews",
           "request": {
             "method": "GET",
-            "url": "{{base_url}}/api/v1/reviews?restaurantId={{restaurant_id}}&dishId={{dish_id}}&page=1&limit=10",
-            "description": "Used by Reviews and Dish details screens. dishId is optional."
+            "url": "{{base_url}}/api/v1/reviews?restaurantId={{restaurant_id}}&dishId={{dish_id}}&reviewType=customer&page=1&limit=10",
+            "description": "Used by Reviews and Dish details screens. dishId and reviewType are optional. reviewType can be customer or sd_admin."
+          }
+        },
+        {
+          "name": "List My Reviews",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/me/reviews?page=1&limit=10",
+            "description": "Used by profile/my activity screens if the user needs to manage their own reviews."
           }
         },
         {
@@ -213,7 +314,7 @@
             "method": "POST",
             "header": [],
             "url": "{{base_url}}/api/v1/reviews",
-            "description": "Used by Your review screen. Supports multipart/form-data with images files, or JSON with image asset objects. Recalculates ratings.",
+            "description": "Used by Your review screen. Customer must check in to the restaurant before creating this review. Supports multipart/form-data with images files, or JSON with image asset objects. Recalculates customer rating aggregates.",
             "body": {
               "mode": "formdata",
               "formdata": [
@@ -224,6 +325,33 @@
                 { "key": "images", "type": "file", "src": "" }
               ]
             }
+          }
+        },
+        {
+          "name": "Update My Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [],
+            "url": "{{base_url}}/api/v1/reviews/{{review_id}}",
+            "description": "Lets a customer edit only their own review. Supports multipart/form-data images or JSON without files.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "rating", "type": "text", "value": "4" },
+                { "key": "comment", "type": "text", "value": "Updated review text." },
+                { "key": "images", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete My Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{customer_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/reviews/{{review_id}}",
+            "description": "Soft deletes only the authenticated customer's own review and recalculates ratings."
           }
         },
         {
@@ -352,6 +480,20 @@
             "method": "DELETE",
             "url": "{{base_url}}/api/v1/owner/restaurant/gallery/{{gallery_image_id}}",
             "description": "Deletes a gallery item from the restaurant and Cloudinary."
+          }
+        },
+        {
+          "name": "Reorder Restaurant Gallery",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{owner_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/owner/restaurant/gallery/reorder",
+            "description": "Reorders inside-place/gallery images. Any gallery images not included stay after the submitted order.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orderedImageIds\": [\"{{gallery_image_id}}\"]\n}"
+            }
           }
         },
         {
@@ -562,8 +704,8 @@
           "request": {
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
             "method": "GET",
-            "url": "{{base_url}}/api/v1/admin/restaurants?page=1&limit=10&search=Restaurant&status=pending",
-            "description": "Used by Restaurants Managements screen."
+            "url": "{{base_url}}/api/v1/admin/restaurants?page=1&limit=10&search=Restaurant&status=pending&category=German&priceRange=$$&district=Munich",
+            "description": "Used by Restaurants Managements screen. Supports search, status, category, priceRange, and district filters."
           }
         },
         {
@@ -573,6 +715,35 @@
             "method": "GET",
             "url": "{{base_url}}/api/v1/admin/restaurants/{{restaurant_id}}",
             "description": "Used by admin Restaurants Details and Dish details screens."
+          }
+        },
+        {
+          "name": "Admin Dish Details",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/admin/dishes/{{dish_id}}",
+            "description": "Used by admin Dish details screen. Includes dish, restaurant/owner context, and dish reviews."
+          }
+        },
+        {
+          "name": "Update Dish Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/dishes/{{dish_id}}/status",
+            "description": "Sets dish status to draft, active, inactive, or deleted.",
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"active\"\n}" }
+          }
+        },
+        {
+          "name": "Delete Dish",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{base_url}}/api/v1/admin/dishes/{{dish_id}}",
+            "description": "Soft deletes a dish, removes saved references, soft deletes dish-specific reviews, and recalculates ratings."
           }
         },
         {
@@ -600,8 +771,50 @@
           "request": {
             "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
             "method": "GET",
-            "url": "{{base_url}}/api/v1/admin/reviews?page=1&limit=10&restaurantId={{restaurant_id}}&status=active",
-            "description": "Used by admin Reviews screen."
+            "url": "{{base_url}}/api/v1/admin/reviews?page=1&limit=10&restaurantId={{restaurant_id}}&status=active&reviewType=customer",
+            "description": "Used by admin Reviews screen. reviewType can be customer or sd_admin; omit it to see both."
+          }
+        },
+        {
+          "name": "Create SD Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/reviews/sd",
+            "description": "Creates an SD/admin editorial review for a restaurant or dish. This is separate from customer check-in reviews.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"restaurantId\": \"{{restaurant_id}}\",\n  \"dishId\": \"{{dish_id}}\",\n  \"rating\": 5,\n  \"comment\": \"SD editorial review\",\n  \"status\": \"active\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Any Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/reviews/{{review_id}}",
+            "description": "Admin can edit any review. If the target is a customer review, override metadata is recorded.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 4,\n  \"comment\": \"Admin adjusted review text\",\n  \"status\": \"active\",\n  \"overrideReason\": \"Moderation correction\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Override Customer Review",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{admin_token}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/api/v1/admin/reviews/{{review_id}}/override",
+            "description": "Explicit endpoint for admin overriding a customer review. Stores originalReview, overriddenBy, overriddenAt, and overrideReason.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 3,\n  \"comment\": \"Admin adjusted customer review\",\n  \"overrideReason\": \"Moderation correction\"\n}"
+            }
           }
         },
         {

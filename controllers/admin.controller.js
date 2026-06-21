@@ -6,11 +6,16 @@ import sendSuccess from '../utils/apiResponse.js';
 import { deleteAccountCascade } from '../utils/accountDeletion.js';
 import { streamUpload, toImageAsset } from '../utils/cloudinaryUpload.js';
 import { getPagination, getPaginationMeta } from '../utils/pagination.js';
-import { recalculateReviewTargets } from '../utils/recalculateRatings.js';
+import {
+  recalculateDishRating,
+  recalculateRestaurantRating,
+  recalculateReviewTargets
+} from '../utils/recalculateRatings.js';
 import User from '../models/user.model.js';
 import Restaurant from '../models/restaurant.model.js';
 import Dish from '../models/dish.model.js';
 import Review from '../models/review.model.js';
+import SavedItem from '../models/savedItem.model.js';
 import CheckIn from '../models/checkIn.model.js';
 import RestaurantView from '../models/restaurantView.model.js';
 import StaticPage from '../models/staticPage.model.js';
@@ -35,6 +40,72 @@ const monthlyCount = async (Model, match = {}) => {
     },
     { $sort: { '_id.year': 1, '_id.month': 1 } }
   ]);
+};
+
+const validateReviewTarget = async ({ restaurantId, dishId, allowInactive = true }) => {
+  const restaurant = await Restaurant.findOne({
+    _id: restaurantId,
+    status: allowInactive ? { $ne: 'deleted' } : 'active'
+  });
+
+  if (!restaurant) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Restaurant not found');
+  }
+
+  if (dishId) {
+    const dish = await Dish.findOne({
+      _id: dishId,
+      restaurant: restaurant._id,
+      status: allowInactive ? { $ne: 'deleted' } : 'active'
+    });
+
+    if (!dish) {
+      throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found for this restaurant');
+    }
+  }
+
+  return restaurant;
+};
+
+const applyAdminReviewChanges = async (review, body, adminUserId, { requireCustomerOverride = false } = {}) => {
+  if (requireCustomerOverride && review.reviewType !== 'customer') {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Only customer reviews can be overridden');
+  }
+
+  const isCustomerOverride = review.reviewType === 'customer';
+
+  if (isCustomerOverride && !review.originalReview?.rating) {
+    review.originalReview = {
+      rating: review.rating,
+      comment: review.comment,
+      images: review.images,
+      status: review.status
+    };
+  }
+
+  if (body.rating !== undefined) review.rating = body.rating;
+  if (body.comment !== undefined) review.comment = body.comment;
+  if (body.images !== undefined) review.images = body.images;
+  if (body.status !== undefined) {
+    review.status = body.status;
+    review.deletedAt = body.status === 'deleted' ? new Date() : undefined;
+  }
+
+  if (isCustomerOverride) {
+    review.overriddenBy = adminUserId;
+    review.overriddenAt = new Date();
+    review.overrideReason = body.overrideReason;
+  }
+
+  await review.save();
+  await recalculateReviewTargets(review);
+  await review.populate('user', 'name email avatar');
+  await review.populate('adminAuthor', 'name email avatar');
+  await review.populate('overriddenBy', 'name email avatar');
+  await review.populate('restaurant', 'name gallery');
+  await review.populate('dish', 'name images');
+
+  return review;
 };
 
 export const getAdminDashboard = catchAsync(async (req, res) => {
@@ -186,6 +257,8 @@ export const listAdminRestaurants = catchAsync(async (req, res) => {
 
   if (req.query.status) filters.status = req.query.status;
   if (req.query.category) filters.categories = req.query.category;
+  if (req.query.priceRange) filters.priceRange = req.query.priceRange;
+  if (req.query.district) filters.address = new RegExp(req.query.district, 'i');
 
   const [restaurants, total] = await Promise.all([
     Restaurant.find(filters)
@@ -278,6 +351,91 @@ export const deleteAdminRestaurant = catchAsync(async (req, res) => {
   sendSuccess(res, StatusCodes.OK, 'Restaurant deleted successfully');
 });
 
+export const getAdminDish = catchAsync(async (req, res) => {
+  const dish = await Dish.findOne({
+    _id: req.params.id,
+    status: { $ne: 'deleted' }
+  }).populate({
+    path: 'restaurant',
+    select: 'name owner address phone email ratingAverage ratingCount status',
+    populate: { path: 'owner', select: 'name email phone avatar' }
+  });
+
+  if (!dish) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
+  }
+
+  const reviews = await Review.find({
+    dish: dish._id,
+    status: { $ne: 'deleted' }
+  })
+    .populate('user', 'name email avatar')
+    .sort({ createdAt: -1 })
+    .limit(20);
+
+  sendSuccess(res, StatusCodes.OK, 'Dish details fetched successfully', {
+    dish,
+    reviews
+  });
+});
+
+export const updateAdminDishStatus = catchAsync(async (req, res) => {
+  const { status } = req.body;
+  const update = status === 'deleted'
+    ? { $set: { status, deletedAt: new Date() } }
+    : { $set: { status }, $unset: { deletedAt: '' } };
+
+  const dish = await Dish.findByIdAndUpdate(req.params.id, update, {
+    new: true,
+    runValidators: true
+  });
+
+  if (!dish) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
+  }
+
+  if (status === 'deleted') {
+    await Promise.all([
+      Review.updateMany(
+        { dish: dish._id, status: { $ne: 'deleted' } },
+        { status: 'deleted', deletedAt: new Date() }
+      ),
+      SavedItem.deleteMany({ dish: dish._id })
+    ]);
+  }
+
+  await recalculateRestaurantRating(dish.restaurant);
+  await recalculateDishRating(dish._id);
+
+  sendSuccess(res, StatusCodes.OK, 'Dish status updated successfully', { dish });
+});
+
+export const deleteAdminDish = catchAsync(async (req, res) => {
+  const deletedAt = new Date();
+  const dish = await Dish.findByIdAndUpdate(
+    req.params.id,
+    { status: 'deleted', deletedAt },
+    { new: true }
+  );
+
+  if (!dish) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
+  }
+
+  await Promise.all([
+    Review.updateMany(
+      { dish: dish._id, status: { $ne: 'deleted' } },
+      { status: 'deleted', deletedAt }
+    ),
+    SavedItem.deleteMany({ dish: dish._id })
+  ]);
+
+  await recalculateRestaurantRating(dish.restaurant);
+  await recalculateDishRating(dish._id);
+
+  sendSuccess(res, StatusCodes.OK, 'Dish deleted successfully');
+});
+
 export const listAdminReviews = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filters = {};
@@ -286,10 +444,13 @@ export const listAdminReviews = catchAsync(async (req, res) => {
   else filters.status = { $ne: 'deleted' };
   if (req.query.restaurantId) filters.restaurant = req.query.restaurantId;
   if (req.query.dishId) filters.dish = req.query.dishId;
+  if (req.query.reviewType) filters.reviewType = req.query.reviewType;
 
   const [reviews, total] = await Promise.all([
     Review.find(filters)
       .populate('user', 'name email avatar')
+      .populate('adminAuthor', 'name email avatar')
+      .populate('overriddenBy', 'name email avatar')
       .populate('restaurant', 'name gallery')
       .populate('dish', 'name images')
       .sort({ createdAt: -1 })
@@ -305,6 +466,62 @@ export const listAdminReviews = catchAsync(async (req, res) => {
     { reviews },
     getPaginationMeta(total, page, limit)
   );
+});
+
+export const createAdminSdReview = catchAsync(async (req, res) => {
+  const { restaurantId, dishId, rating, comment, images = [], status = 'active' } = req.body;
+
+  await validateReviewTarget({ restaurantId, dishId });
+
+  const review = await Review.create({
+    adminAuthor: req.user._id,
+    reviewType: 'sd_admin',
+    restaurant: restaurantId,
+    dish: dishId,
+    rating,
+    comment,
+    images,
+    status
+  });
+
+  await review.populate('adminAuthor', 'name email avatar');
+  await review.populate('restaurant', 'name gallery');
+  await review.populate('dish', 'name images');
+
+  sendSuccess(res, StatusCodes.CREATED, 'SD review created successfully', { review });
+});
+
+export const updateAdminReview = catchAsync(async (req, res) => {
+  const review = await Review.findOne({
+    _id: req.params.id,
+    status: { $ne: 'deleted' }
+  });
+
+  if (!review) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Review not found');
+  }
+
+  const updatedReview = await applyAdminReviewChanges(review, req.body, req.user._id);
+
+  sendSuccess(res, StatusCodes.OK, 'Review updated successfully', { review: updatedReview });
+});
+
+export const overrideCustomerReview = catchAsync(async (req, res) => {
+  const review = await Review.findOne({
+    _id: req.params.id,
+    reviewType: 'customer',
+    status: { $ne: 'deleted' }
+  });
+
+  if (!review) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Review not found');
+  }
+
+  const updatedReview = await applyAdminReviewChanges(review, req.body, req.user._id, {
+    requireCustomerOverride: true
+  });
+
+  sendSuccess(res, StatusCodes.OK, 'Customer review overridden successfully', { review: updatedReview });
 });
 
 export const updateAdminReviewStatus = catchAsync(async (req, res) => {

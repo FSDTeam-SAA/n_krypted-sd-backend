@@ -5,6 +5,9 @@ export const restaurantListSchema = {
   query: paginationQuery.extend({
     search: z.string().optional(),
     category: z.string().optional(),
+    priceRange: z.enum(['$', '$$', '$$$', '$$$$']).optional(),
+    district: z.string().optional(),
+    openNow: z.enum(['true', 'false']).optional(),
     minRating: z.coerce.number().min(1).max(5).optional(),
     sort: z.enum(['rating', 'popular', 'newest']).optional()
   })
@@ -17,6 +20,9 @@ export const nearbyRestaurantsSchema = {
     radius: z.coerce.number().positive().max(100000).optional(),
     search: z.string().optional(),
     category: z.string().optional(),
+    priceRange: z.enum(['$', '$$', '$$$', '$$$$']).optional(),
+    district: z.string().optional(),
+    openNow: z.enum(['true', 'false']).optional(),
     minRating: z.coerce.number().min(1).max(5).optional(),
     sort: z.enum(['distance', 'rating', 'popular']).optional()
   })

@@ -4,7 +4,7 @@ import Review from '../models/review.model.js';
 
 const calculateAggregate = async (match) => {
   const [aggregate] = await Review.aggregate([
-    { $match: { ...match, status: 'active' } },
+    { $match: { ...match, status: 'active', reviewType: 'customer' } },
     {
       $group: {
         _id: null,

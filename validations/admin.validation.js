@@ -24,6 +24,8 @@ export const listRestaurantsSchema = {
   query: paginationQuery.extend({
     search: z.string().optional(),
     category: z.string().optional(),
+    priceRange: z.enum(['$', '$$', '$$$', '$$$$']).optional(),
+    district: z.string().optional(),
     status: z.enum(['pending', 'active', 'inactive', 'blocked', 'deleted']).optional()
   })
 };
@@ -35,11 +37,41 @@ export const updateRestaurantStatusSchema = {
   })
 };
 
+export const updateDishStatusSchema = {
+  params: idParam,
+  body: z.object({
+    status: z.enum(['draft', 'active', 'inactive', 'deleted'])
+  })
+};
+
 export const listAdminReviewsSchema = {
   query: paginationQuery.extend({
     status: z.enum(['active', 'hidden', 'deleted']).optional(),
+    reviewType: z.enum(['customer', 'sd_admin']).optional(),
     restaurantId: z.string().optional(),
     dishId: z.string().optional()
+  })
+};
+
+export const createSdReviewSchema = {
+  body: z.object({
+    restaurantId: z.string().min(1),
+    dishId: z.string().min(1).optional(),
+    rating: z.coerce.number().int().min(1).max(5),
+    comment: z.string().optional(),
+    images: z.array(imageAssetSchema).optional(),
+    status: z.enum(['active', 'hidden']).optional()
+  })
+};
+
+export const updateAdminReviewSchema = {
+  params: idParam,
+  body: z.object({
+    rating: z.coerce.number().int().min(1).max(5).optional(),
+    comment: z.string().optional(),
+    images: z.array(imageAssetSchema).optional(),
+    status: z.enum(['active', 'hidden', 'deleted']).optional(),
+    overrideReason: z.string().optional()
   })
 };
 

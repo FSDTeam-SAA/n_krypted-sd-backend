@@ -3,6 +3,7 @@ import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
 import sendSuccess from '../utils/apiResponse.js';
 import { getPagination, getPaginationMeta } from '../utils/pagination.js';
+import { addSavedFlags } from '../utils/savedFlags.js';
 import Restaurant from '../models/restaurant.model.js';
 import Dish from '../models/dish.model.js';
 
@@ -16,8 +17,31 @@ const buildRestaurantFilters = (query) => {
     filters.categories = query.category;
   }
 
+  if (query.priceRange) {
+    filters.priceRange = query.priceRange;
+  }
+
   if (query.minRating) {
     filters.ratingAverage = { $gte: Number(query.minRating) };
+  }
+
+  if (query.district) {
+    filters.address = new RegExp(query.district, 'i');
+  }
+
+  if (query.openNow === 'true') {
+    const now = new Date();
+    const day = now.toLocaleDateString('en-US', { weekday: 'long' });
+    const time = now.toTimeString().slice(0, 5);
+
+    filters.openingHours = {
+      $elemMatch: {
+        day,
+        closed: { $ne: true },
+        open: { $lte: time },
+        close: { $gte: time }
+      }
+    };
   }
 
   if (query.search) {
@@ -46,7 +70,7 @@ export const listRestaurants = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filters = buildRestaurantFilters(req.query);
 
-  const [restaurants, total] = await Promise.all([
+  const [restaurantDocs, total] = await Promise.all([
     Restaurant.find(filters)
       .sort(getSort(req.query.sort))
       .skip(skip)
@@ -54,6 +78,7 @@ export const listRestaurants = catchAsync(async (req, res) => {
       .populate('owner', 'name email phone avatar'),
     Restaurant.countDocuments(filters)
   ]);
+  const { restaurants } = await addSavedFlags(req.user?._id, { restaurants: restaurantDocs });
 
   sendSuccess(
     res,
@@ -101,8 +126,9 @@ export const listNearbyRestaurants = catchAsync(async (req, res) => {
   });
 
   const [result] = await Restaurant.aggregate(pipeline);
-  const restaurants = result?.data || [];
+  const restaurantDocs = result?.data || [];
   const total = result?.count?.[0]?.total || 0;
+  const { restaurants } = await addSavedFlags(req.user?._id, { restaurants: restaurantDocs });
 
   sendSuccess(
     res,
@@ -123,7 +149,7 @@ export const getRestaurant = catchAsync(async (req, res) => {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Restaurant not found');
   }
 
-  const [signatureDishes, dishes] = await Promise.all([
+  const [signatureDishDocs, dishDocs] = await Promise.all([
     Dish.find({ restaurant: restaurant._id, isSignature: true, ...activeDishQuery })
       .sort({ ratingAverage: -1 })
       .limit(6),
@@ -131,9 +157,15 @@ export const getRestaurant = catchAsync(async (req, res) => {
       .sort({ isSignature: -1, createdAt: -1 })
       .limit(20)
   ]);
+  const saved = await addSavedFlags(req.user?._id, {
+    restaurants: [restaurant],
+    dishes: [...signatureDishDocs, ...dishDocs]
+  });
+  const signatureDishes = saved.dishes.slice(0, signatureDishDocs.length);
+  const dishes = saved.dishes.slice(signatureDishDocs.length);
 
   sendSuccess(res, StatusCodes.OK, 'Restaurant details fetched successfully', {
-    restaurant,
+    restaurant: saved.restaurants[0],
     signatureDishes,
     dishes
   });
@@ -151,10 +183,11 @@ export const listRestaurantDishes = catchAsync(async (req, res) => {
   if (req.query.category) filters.category = req.query.category;
   if (req.query.signatureOnly === 'true') filters.isSignature = true;
 
-  const [dishes, total] = await Promise.all([
+  const [dishDocs, total] = await Promise.all([
     Dish.find(filters).sort({ isSignature: -1, createdAt: -1 }).skip(skip).limit(limit),
     Dish.countDocuments(filters)
   ]);
+  const { dishes } = await addSavedFlags(req.user?._id, { dishes: dishDocs });
 
   sendSuccess(
     res,
