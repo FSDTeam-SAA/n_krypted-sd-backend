@@ -5,25 +5,88 @@ import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
 import sendSuccess from '../utils/apiResponse.js';
 import { deleteAccountCascade } from '../utils/accountDeletion.js';
+import {
+  createAuthTokens,
+  generateOtp,
+  generateResetToken,
+  getRefreshTokenSecret,
+  hashValue,
+  parseDurationMs
+} from '../utils/authTokens.js';
 import { streamUpload, toImageAsset } from '../utils/cloudinaryUpload.js';
+import { sendOtpEmail } from '../utils/email.js';
 import User from '../models/user.model.js';
 import Restaurant from '../models/restaurant.model.js';
 
-const signToken = (user) => {
-  return jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d'
-  });
+const otpExpiryDate = () => {
+  const minutes = Number(process.env.OTP_EXPIRES_IN_MINUTES) || 10;
+  return new Date(Date.now() + minutes * 60 * 1000);
 };
 
-const authPayload = async (user, message, statusCode = StatusCodes.OK, restaurant = undefined) => ({
-  message,
-  statusCode,
-  data: {
-    token: signToken(user),
-    user,
-    ...(restaurant && { restaurant })
-  }
+const resetTokenExpiryDate = () => {
+  const minutes = Number(process.env.PASSWORD_RESET_TOKEN_EXPIRES_IN_MINUTES) || 15;
+  return new Date(Date.now() + minutes * 60 * 1000);
+};
+
+const buildOtpResponse = (expiresAt, emailResult) => ({
+  expiresAt,
+  emailSent: emailResult.sent,
+  emailSkipped: emailResult.skipped,
+  ...(emailResult.devOtp && { devOtp: emailResult.devOtp })
 });
+
+const issueOtp = async (user, purpose) => {
+  const otp = generateOtp();
+  const otpHash = await bcrypt.hash(otp, 12);
+  const expiresAt = otpExpiryDate();
+
+  if (purpose === 'password_reset') {
+    user.passwordResetOtpHash = otpHash;
+    user.passwordResetOtpExpiresAt = expiresAt;
+    user.passwordResetTokenHash = undefined;
+    user.passwordResetTokenExpiresAt = undefined;
+  } else {
+    user.emailVerificationOtpHash = otpHash;
+    user.emailVerificationOtpExpiresAt = expiresAt;
+  }
+
+  await user.save();
+
+  try {
+    const emailResult = await sendOtpEmail({ to: user.email, otp, purpose });
+    return buildOtpResponse(expiresAt, emailResult);
+  } catch {
+    throw new ApiError(StatusCodes.BAD_GATEWAY, 'Failed to send OTP email');
+  }
+};
+
+const getUserForOtp = async (email) => {
+  return User.findOne({ email, status: { $ne: 'deleted' } }).select(
+    '+emailVerificationOtpHash +emailVerificationOtpExpiresAt +passwordResetOtpHash +passwordResetOtpExpiresAt +passwordResetTokenHash +passwordResetTokenExpiresAt +refreshTokenHash +refreshTokenExpiresAt'
+  );
+};
+
+const verifyOtpValue = async (otp, hash, expiresAt) => {
+  if (!hash || !expiresAt || expiresAt.getTime() < Date.now()) {
+    return false;
+  }
+
+  return bcrypt.compare(otp, hash);
+};
+
+const authPayload = async (user, message, statusCode = StatusCodes.OK, restaurant = undefined) => {
+  const tokens = await createAuthTokens(user);
+
+  return {
+    message,
+    statusCode,
+    data: {
+      ...tokens,
+      user,
+      ...(restaurant && { restaurant })
+    }
+  };
+};
 
 export const register = catchAsync(async (req, res) => {
   const { name, email, password, role = 'customer', phone, restaurant: restaurantInput } = req.body;
@@ -47,8 +110,51 @@ export const register = catchAsync(async (req, res) => {
     });
   }
 
-  const payload = await authPayload(user, 'Registration successful', StatusCodes.CREATED, restaurant);
+  const otp = await issueOtp(user, 'email_verification');
+
+  sendSuccess(res, StatusCodes.CREATED, 'Registration successful. Please verify your email', {
+    user,
+    ...(restaurant && { restaurant }),
+    otp
+  });
+});
+
+export const verifyEmailOtp = catchAsync(async (req, res) => {
+  const { email, otp } = req.body;
+  const user = await getUserForOtp(email);
+
+  if (!user || !(await verifyOtpValue(otp, user.emailVerificationOtpHash, user.emailVerificationOtpExpiresAt))) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired OTP');
+  }
+
+  user.emailVerified = true;
+  user.emailVerifiedAt = new Date();
+  user.emailVerificationOtpHash = undefined;
+  user.emailVerificationOtpExpiresAt = undefined;
+  await user.save();
+
+  const restaurant = user.role === 'restaurant_owner'
+    ? await Restaurant.findOne({ owner: user._id, status: { $ne: 'deleted' } })
+    : undefined;
+
+  const payload = await authPayload(user, 'Email verified successfully', StatusCodes.OK, restaurant);
   sendSuccess(res, payload.statusCode, payload.message, payload.data);
+});
+
+export const resendVerificationOtp = catchAsync(async (req, res) => {
+  const user = await getUserForOtp(req.body.email);
+
+  if (!user) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
+  }
+
+  if (user.emailVerified) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Email is already verified');
+  }
+
+  const otp = await issueOtp(user, 'email_verification');
+
+  sendSuccess(res, StatusCodes.OK, 'Email verification OTP sent successfully', { otp });
 });
 
 export const login = catchAsync(async (req, res) => {
@@ -63,12 +169,115 @@ export const login = catchAsync(async (req, res) => {
     throw new ApiError(StatusCodes.FORBIDDEN, 'This account is not active');
   }
 
+  if (!user.emailVerified) {
+    throw new ApiError(StatusCodes.FORBIDDEN, 'Please verify your email before logging in');
+  }
+
   const restaurant = user.role === 'restaurant_owner'
     ? await Restaurant.findOne({ owner: user._id, status: { $ne: 'deleted' } })
     : undefined;
 
   const payload = await authPayload(user, 'Login successful', StatusCodes.OK, restaurant);
   sendSuccess(res, payload.statusCode, payload.message, payload.data);
+});
+
+export const refreshToken = catchAsync(async (req, res) => {
+  const { refreshToken: token } = req.body;
+
+  if (!token) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Refresh token is required');
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, getRefreshTokenSecret());
+  } catch {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid refresh token');
+  }
+
+  if (decoded.type !== 'refresh') {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid refresh token');
+  }
+
+  const user = await User.findOne({
+    _id: decoded.id,
+    status: { $nin: ['blocked', 'deleted'] }
+  }).select('+refreshTokenHash +refreshTokenExpiresAt');
+
+  const tokenMatches = user?.refreshTokenHash === hashValue(token);
+  const tokenActive = user?.refreshTokenExpiresAt && user.refreshTokenExpiresAt.getTime() > Date.now();
+
+  if (!user || !tokenMatches || !tokenActive) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid refresh token');
+  }
+
+  const tokens = await createAuthTokens(user);
+
+  sendSuccess(res, StatusCodes.OK, 'Token refreshed successfully', {
+    ...tokens,
+    user
+  });
+});
+
+export const forgotPassword = catchAsync(async (req, res) => {
+  const user = await getUserForOtp(req.body.email);
+
+  if (!user || ['blocked', 'deleted'].includes(user.status)) {
+    sendSuccess(res, StatusCodes.OK, 'Password reset OTP sent successfully', {
+      otp: { emailSent: false }
+    });
+    return;
+  }
+
+  const otp = await issueOtp(user, 'password_reset');
+
+  sendSuccess(res, StatusCodes.OK, 'Password reset OTP sent successfully', { otp });
+});
+
+export const verifyPasswordResetOtp = catchAsync(async (req, res) => {
+  const { email, otp } = req.body;
+  const user = await getUserForOtp(email);
+
+  if (!user || !(await verifyOtpValue(otp, user.passwordResetOtpHash, user.passwordResetOtpExpiresAt))) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired OTP');
+  }
+
+  const resetToken = generateResetToken();
+  user.passwordResetTokenHash = hashValue(resetToken);
+  user.passwordResetTokenExpiresAt = resetTokenExpiryDate();
+  user.passwordResetOtpHash = undefined;
+  user.passwordResetOtpExpiresAt = undefined;
+  await user.save();
+
+  sendSuccess(res, StatusCodes.OK, 'Password reset OTP verified successfully', {
+    resetToken,
+    expiresAt: user.passwordResetTokenExpiresAt
+  });
+});
+
+export const resetPassword = catchAsync(async (req, res) => {
+  const { email, resetToken, newPassword } = req.body;
+
+  if (!resetToken) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Password reset token is required');
+  }
+
+  const user = await getUserForOtp(email);
+  const tokenMatches = user?.passwordResetTokenHash === hashValue(resetToken);
+  const tokenActive = user?.passwordResetTokenExpiresAt && user.passwordResetTokenExpiresAt.getTime() > Date.now();
+
+  if (!user || !tokenMatches || !tokenActive) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired password reset token');
+  }
+
+  user.passwordHash = await bcrypt.hash(newPassword, 12);
+  user.passwordResetTokenHash = undefined;
+  user.passwordResetTokenExpiresAt = undefined;
+  user.refreshTokenHash = undefined;
+  user.refreshTokenExpiresAt = undefined;
+  await user.save();
+
+  sendSuccess(res, StatusCodes.OK, 'Password reset successfully');
 });
 
 export const getMe = catchAsync(async (req, res) => {
@@ -111,9 +320,22 @@ export const changePassword = catchAsync(async (req, res) => {
   }
 
   user.passwordHash = await bcrypt.hash(newPassword, 12);
+  user.refreshTokenHash = undefined;
+  user.refreshTokenExpiresAt = undefined;
   await user.save();
 
   sendSuccess(res, StatusCodes.OK, 'Password changed successfully');
+});
+
+export const logout = catchAsync(async (req, res) => {
+  await User.findByIdAndUpdate(req.user._id, {
+    $unset: {
+      refreshTokenHash: '',
+      refreshTokenExpiresAt: ''
+    }
+  });
+
+  sendSuccess(res, StatusCodes.OK, 'Logged out successfully');
 });
 
 export const deleteMe = catchAsync(async (req, res) => {

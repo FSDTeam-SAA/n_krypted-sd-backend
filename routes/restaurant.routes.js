@@ -18,10 +18,10 @@ import {
 
 const router = Router();
 
-router.get('/', validate(restaurantListSchema), listRestaurants);
-router.get('/nearby', validate(nearbyRestaurantsSchema), listNearbyRestaurants);
-router.get('/:id', validate(restaurantIdSchema), getRestaurant);
-router.get('/:id/dishes', validate(restaurantDishesSchema), listRestaurantDishes);
+router.get('/', optionalAuth, validate(restaurantListSchema), listRestaurants);
+router.get('/nearby', optionalAuth, validate(nearbyRestaurantsSchema), listNearbyRestaurants);
+router.get('/:id', optionalAuth, validate(restaurantIdSchema), getRestaurant);
+router.get('/:id/dishes', optionalAuth, validate(restaurantDishesSchema), listRestaurantDishes);
 router.post('/:id/check-ins', protect, validate(createCheckInSchema), createCheckIn);
 router.post('/:id/views', optionalAuth, validate(restaurantIdSchema), createRestaurantView);
 

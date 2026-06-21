@@ -2,8 +2,8 @@ import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
 import sendSuccess from '../utils/apiResponse.js';
+import { addSavedFlags } from '../utils/savedFlags.js';
 import Dish from '../models/dish.model.js';
-import Restaurant from '../models/restaurant.model.js';
 
 export const getDish = catchAsync(async (req, res) => {
   const dish = await Dish.findOne({
@@ -26,9 +26,16 @@ export const getDish = catchAsync(async (req, res) => {
     status: 'active',
     deletedAt: { $exists: false }
   }).limit(6);
+  const saved = await addSavedFlags(req.user?._id, {
+    restaurants: [dish.restaurant],
+    dishes: [dish, ...relatedDishes]
+  });
 
   sendSuccess(res, StatusCodes.OK, 'Dish details fetched successfully', {
-    dish,
-    relatedDishes
+    dish: {
+      ...saved.dishes[0],
+      restaurant: saved.restaurants[0]
+    },
+    relatedDishes: saved.dishes.slice(1)
   });
 });

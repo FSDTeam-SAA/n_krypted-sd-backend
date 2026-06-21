@@ -72,6 +72,12 @@ export const updateOwnerRestaurantSchema = {
   body: restaurantBody
 };
 
+export const reorderGallerySchema = {
+  body: z.object({
+    orderedImageIds: z.array(z.string().min(1)).min(1)
+  })
+};
+
 export const listOwnerDishesSchema = {
   query: paginationQuery.extend({
     category: z.string().optional(),

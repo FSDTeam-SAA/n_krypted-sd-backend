@@ -8,6 +8,7 @@ import { recalculateDishRating, recalculateRestaurantRating } from '../utils/rec
 import Restaurant from '../models/restaurant.model.js';
 import Dish from '../models/dish.model.js';
 import Review from '../models/review.model.js';
+import SavedItem from '../models/savedItem.model.js';
 import CheckIn from '../models/checkIn.model.js';
 import RestaurantView from '../models/restaurantView.model.js';
 
@@ -158,6 +159,28 @@ export const deleteRestaurantGalleryImage = catchAsync(async (req, res) => {
   sendSuccess(res, StatusCodes.OK, 'Restaurant gallery image deleted successfully', { restaurant });
 });
 
+export const reorderRestaurantGallery = catchAsync(async (req, res) => {
+  const restaurant = await getOwnerRestaurantOrFail(req.user._id);
+  const orderedIds = req.body.orderedImageIds.map(String);
+  const imageById = new Map(restaurant.gallery.map((image) => [String(image._id), image]));
+  const missingId = orderedIds.find((id) => !imageById.has(id));
+
+  if (missingId) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Gallery image not found');
+  }
+
+  const orderedSet = new Set(orderedIds);
+  const reordered = [
+    ...orderedIds.map((id) => imageById.get(id)),
+    ...restaurant.gallery.filter((image) => !orderedSet.has(String(image._id)))
+  ];
+
+  restaurant.gallery = reordered.map((image) => image.toObject());
+  await restaurant.save();
+
+  sendSuccess(res, StatusCodes.OK, 'Restaurant gallery reordered successfully', { restaurant });
+});
+
 export const listOwnerDishes = catchAsync(async (req, res) => {
   const restaurant = await getOwnerRestaurantOrFail(req.user._id);
   const { page, limit, skip } = getPagination(req.query);
@@ -251,6 +274,14 @@ export const deleteOwnerDish = catchAsync(async (req, res) => {
   if (!dish) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
   }
+
+  await Promise.all([
+    Review.updateMany(
+      { dish: dish._id, status: { $ne: 'deleted' } },
+      { status: 'deleted', deletedAt: new Date() }
+    ),
+    SavedItem.deleteMany({ dish: dish._id })
+  ]);
 
   await recalculateRestaurantRating(restaurant._id);
   await recalculateDishRating(dish._id);

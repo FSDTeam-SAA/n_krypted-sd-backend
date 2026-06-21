@@ -36,6 +36,14 @@ export const pointSchema = new mongoose.Schema(
 
 export const stripPrivateFields = (doc, ret) => {
   delete ret.passwordHash;
+  delete ret.emailVerificationOtpHash;
+  delete ret.emailVerificationOtpExpiresAt;
+  delete ret.passwordResetOtpHash;
+  delete ret.passwordResetOtpExpiresAt;
+  delete ret.passwordResetTokenHash;
+  delete ret.passwordResetTokenExpiresAt;
+  delete ret.refreshTokenHash;
+  delete ret.refreshTokenExpiresAt;
   delete ret.__v;
   return ret;
 };

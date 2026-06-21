@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
+import { getAccessTokenSecret } from '../utils/authTokens.js';
 import User from '../models/user.model.js';
 
 const getToken = (req) => {
@@ -17,7 +18,11 @@ export const protect = async (req, res, next) => {
       throw new ApiError(StatusCodes.UNAUTHORIZED, 'Authentication token is required');
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, getAccessTokenSecret());
+    if (decoded.type && decoded.type !== 'access') {
+      throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid authentication token');
+    }
+
     const user = await User.findOne({
       _id: decoded.id,
       status: { $nin: ['blocked', 'deleted'] }
@@ -41,7 +46,9 @@ export const optionalAuth = async (req, res, next) => {
     const token = getToken(req);
     if (!token) return next();
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, getAccessTokenSecret());
+    if (decoded.type && decoded.type !== 'access') return next();
+
     req.user = await User.findOne({
       _id: decoded.id,
       status: { $nin: ['blocked', 'deleted'] }

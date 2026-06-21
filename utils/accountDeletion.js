@@ -97,7 +97,22 @@ export const deleteAccountCascade = async (userId) => {
     }
   }
 
-  await User.findByIdAndUpdate(user._id, { status: 'deleted', deletedAt });
+  await User.findByIdAndUpdate(
+    user._id,
+    {
+      $set: { status: 'deleted', deletedAt },
+      $unset: {
+        refreshTokenHash: '',
+        refreshTokenExpiresAt: '',
+        emailVerificationOtpHash: '',
+        emailVerificationOtpExpiresAt: '',
+        passwordResetOtpHash: '',
+        passwordResetOtpExpiresAt: '',
+        passwordResetTokenHash: '',
+        passwordResetTokenExpiresAt: ''
+      }
+    }
+  );
 
   await Promise.all([
     ...uniqueIds(affectedRestaurantIds).map((restaurantId) => recalculateRestaurantRating(restaurantId)),
