@@ -110,7 +110,7 @@ export const register = catchAsync(async (req, res) => {
     });
   }
 
-  const otp = await issueOtp(user, 'email_verification');
+  const otp = issueOtp(user, 'email_verification');
 
   sendSuccess(res, StatusCodes.CREATED, 'Registration successful. Please verify your email', {
     user,
@@ -152,7 +152,7 @@ export const resendVerificationOtp = catchAsync(async (req, res) => {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Email is already verified');
   }
 
-  const otp = await issueOtp(user, 'email_verification');
+  const otp = issueOtp(user, 'email_verification');
 
   sendSuccess(res, StatusCodes.OK, 'Email verification OTP sent successfully', { otp });
 });
@@ -229,7 +229,7 @@ export const forgotPassword = catchAsync(async (req, res) => {
     return;
   }
 
-  const otp = await issueOtp(user, 'password_reset');
+  const otp = issueOtp(user, 'password_reset');
 
   sendSuccess(res, StatusCodes.OK, 'Password reset OTP sent successfully', { otp });
 });
