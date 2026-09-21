@@ -6,7 +6,7 @@ Both shipped clients resolve their backend base URL to `http://<host>:5000/api` 
 
 | Method | Path | Consumer | Access | Backend status |
 |---|---|---|---|---|
-| POST | `/auth/register` | Flutter | Public | Implemented; immediate verified session unless `REQUIRE_EMAIL_VERIFICATION=true` |
+| POST | `/auth/register` | Flutter | Public | Implemented |
 | POST | `/auth/login` | Flutter, dashboard | Public | Implemented |
 | POST | `/auth/forgot-password` | Flutter, dashboard | Public | Implemented |
 | POST | `/auth/verify` | Flutter, dashboard | Public | Implemented |
