@@ -20,6 +20,7 @@ const reviewSchema = new mongoose.Schema(
     },
     restaurant: { type: mongoose.Schema.Types.ObjectId, ref: 'Restaurant', required: true, index: true },
     dish: { type: mongoose.Schema.Types.ObjectId, ref: 'Dish', index: true },
+    checkIn: { type: mongoose.Schema.Types.ObjectId, ref: 'CheckIn', index: true },
     rating: { type: Number, required: true, min: 1, max: 5 },
     comment: { type: String, trim: true },
     images: [imageSchema],

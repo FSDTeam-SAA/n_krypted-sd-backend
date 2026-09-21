@@ -340,6 +340,75 @@ describe('n_krypted MVP API', () => {
     expect(publicPage.body.data.page.slug).toBe('terms');
   });
 
+  it('supports the API contract used by the Flutter app and dashboard', async () => {
+    const login = await request(app).post('/api/auth/login').send({
+      email: 'admin@example.com',
+      password: 'password123'
+    });
+    expect(login.status).toBe(200);
+    expect(login.body.token).toBeTruthy();
+    expect(login.body.data.role).toBe('admin');
+
+    const deals = await request(app).get('/api/deals?sort=rating');
+    expect(deals.status).toBe(200);
+    expect(deals.body.deals[0].title).toBe('Restaurant JAN');
+    expect(deals.body.deals[0].dishes[0].name).toBe('Schnitzel');
+    expect(Array.isArray(deals.body.deals[0].images)).toBe(true);
+
+    const categories = await request(app).get('/api/categories');
+    expect(categories.status).toBe(200);
+    expect(categories.body.data.some((category) => category.categoryName === 'German')).toBe(true);
+
+    const users = await request(app)
+      .get('/api/auth/all/user')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(users.status).toBe(200);
+    expect(users.body.meta.totalItems).toBe(1);
+
+    const managed = await request(app)
+      .get(`/api/manage/deals/${restaurantId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(managed.status).toBe(200);
+    expect(managed.body.restaurant.approvalStatus).toBe('approved');
+
+    const ownerRestaurant = await request(app)
+      .get('/api/owner/restaurant')
+      .set('Authorization', `Bearer ${ownerToken}`);
+    expect(ownerRestaurant.status).toBe(200);
+    expect(ownerRestaurant.body.restaurant._id).toBe(restaurantId);
+
+    const saved = await request(app)
+      .get('/api/saved')
+      .set('Authorization', `Bearer ${customerToken}`);
+    expect(saved.status).toBe(200);
+    expect(saved.body.items[0].restaurant._id).toBe(restaurantId);
+
+    const checkIns = await request(app)
+      .get('/api/check-ins/my')
+      .set('Authorization', `Bearer ${customerToken}`);
+    expect(checkIns.status).toBe(200);
+    expect(checkIns.body.data[0].restaurantId._id).toBe(restaurantId);
+
+    const reviews = await request(app)
+      .get(`/api/reviews?dealId=${restaurantId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(reviews.status).toBe(200);
+    expect(reviews.body.data[0].dealID._id).toBe(restaurantId);
+    expect(reviews.body.data[0]).toHaveProperty('reviewComment');
+    expect(reviews.body.data[0]).toHaveProperty('ratings');
+
+    const legal = await request(app).get('/api/content/legal');
+    expect(legal.status).toBe(200);
+    expect(legal.body.content.termsHtml).toContain('Sample terms');
+
+    const stats = await request(app)
+      .get('/api/dashboard/stats')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(stats.status).toBe(200);
+    expect(stats.body.data.totalDeals).toBe(1);
+    expect(stats.body.data.totalCheckIns).toBe(1);
+  });
+
   it('cascades account deletion without leaving active related records', async () => {
     const deletedCustomer = await request(app)
       .delete(`/api/v1/admin/users/${customerId}`)

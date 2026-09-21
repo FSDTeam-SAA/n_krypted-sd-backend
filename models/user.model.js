@@ -13,6 +13,8 @@ const userSchema = new mongoose.Schema(
     },
     avatar: imageSchema,
     phone: { type: String, trim: true },
+    country: { type: String, trim: true },
+    cityState: { type: String, trim: true },
     emailVerified: { type: Boolean, default: false },
     emailVerifiedAt: Date,
     emailVerificationOtpHash: { type: String, select: false },

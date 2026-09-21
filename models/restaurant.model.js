@@ -15,10 +15,14 @@ const restaurantSchema = new mongoose.Schema(
   {
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     name: { type: String, required: true, trim: true },
+    shortDescription: { type: String, trim: true },
     email: { type: String, trim: true, lowercase: true },
     phone: { type: String, trim: true },
     address: { type: String, trim: true },
+    city: { type: String, trim: true },
+    country: { type: String, trim: true },
     description: { type: String, trim: true },
+    price: { type: Number, default: 0, min: 0 },
     location: {
       type: pointSchema,
       default: undefined
@@ -30,7 +34,11 @@ const restaurantSchema = new mongoose.Schema(
       default: '$$'
     },
     openingHours: [openingHourSchema],
+    opensAt: Date,
+    reservationRequired: Boolean,
     gallery: [imageSchema],
+    offers: [{ type: String, trim: true }],
+    rejectionReason: { type: String, trim: true },
     status: {
       type: String,
       enum: ['pending', 'active', 'inactive', 'blocked', 'deleted'],
