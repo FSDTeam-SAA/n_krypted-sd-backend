@@ -8,7 +8,11 @@ const checkInSchema = new mongoose.Schema(
     location: {
       type: pointSchema,
       default: undefined
-    }
+    },
+    accuracy: { type: Number, min: 0 },
+    partySize: { type: Number, min: 1, default: 1 },
+    distanceMeters: { type: Number, min: 0, default: 0 },
+    status: { type: String, enum: ['verified'], default: 'verified' }
   },
   {
     timestamps: true,

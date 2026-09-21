@@ -11,6 +11,7 @@ import reviewRoutes from './routes/review.routes.js';
 import myReviewRoutes from './routes/myReview.routes.js';
 import savedRoutes from './routes/saved.routes.js';
 import uploadRoutes from './routes/upload.routes.js';
+import legacyRoutes from './routes/legacy.routes.js';
 import notFound from './middlewares/notFound.js';
 import globalErrorHandler from './middlewares/globalErrorHandler.js';
 import { getBilingualMessage } from './utils/messages.js';
@@ -30,6 +31,10 @@ app.get('/', (req, res) => {
     messageEn: message.en
   });
 });
+
+// The shipped Flutter app and dashboard use the original /api contract.
+// Keep it as an explicit compatibility surface while /api/v1 remains available.
+app.use('/api', legacyRoutes);
 
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/restaurants', restaurantRoutes);
