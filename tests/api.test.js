@@ -341,6 +341,21 @@ describe('n_krypted MVP API', () => {
   });
 
   it('supports the API contract used by the Flutter app and dashboard', async () => {
+    const instantSignup = await request(app).post('/api/auth/register').send({
+      name: 'Flutter Signup User',
+      email: 'flutter-signup@example.com',
+      password: 'password123',
+      role: 'user'
+    });
+    expect(instantSignup.status).toBe(201);
+    expect(instantSignup.body.data.isVerified).toBe(true);
+    expect(instantSignup.body.token).toBeTruthy();
+
+    const cleanupSignup = await request(app)
+      .delete('/api/auth/delete/user')
+      .set('Authorization', `Bearer ${instantSignup.body.token}`);
+    expect(cleanupSignup.status).toBe(200);
+
     const login = await request(app).post('/api/auth/login').send({
       email: 'admin@example.com',
       password: 'password123'
