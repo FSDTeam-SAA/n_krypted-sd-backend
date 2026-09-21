@@ -51,20 +51,37 @@ const validOtp = async (code, hash, expiresAt) => {
 
 export const legacyRegister = catchAsync(async (req, res) => {
   const role = req.body.role === 'restaurant_owner' ? 'restaurant_owner' : req.body.role === 'admin' ? 'admin' : 'customer';
-  if (await User.exists({ email: req.body.email.toLowerCase(), status: { $ne: 'deleted' } })) {
-    throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
-  }
+  const email = req.body.email.toLowerCase();
+  const requireEmailVerification = process.env.REQUIRE_EMAIL_VERIFICATION === 'true';
+  const autoVerify = !requireEmailVerification || role === 'restaurant_owner' || role === 'admin';
+  let user = await User.findOne({ email, status: { $ne: 'deleted' } }).select('+passwordHash');
 
-  const autoVerify = role === 'restaurant_owner' || role === 'admin';
-  const user = await User.create({
-    name: req.body.name,
-    email: req.body.email,
-    passwordHash: await bcrypt.hash(req.body.password, 12),
-    phone: req.body.phoneNumber,
-    role,
-    emailVerified: autoVerify,
-    ...(autoVerify && { emailVerifiedAt: new Date() })
-  });
+  // A blocked SMTP request may have created an unverified account before the
+  // mobile client timed out. When verification is disabled, let the same
+  // signup complete that account instead of trapping the user in a conflict.
+  if (user) {
+    if (!autoVerify || user.emailVerified || user.role !== role) {
+      throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
+    }
+    user.name = req.body.name;
+    user.passwordHash = await bcrypt.hash(req.body.password, 12);
+    user.phone = req.body.phoneNumber;
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    user.emailVerificationOtpHash = undefined;
+    user.emailVerificationOtpExpiresAt = undefined;
+    await user.save();
+  } else {
+    user = await User.create({
+      name: req.body.name,
+      email,
+      passwordHash: await bcrypt.hash(req.body.password, 12),
+      phone: req.body.phoneNumber,
+      role,
+      emailVerified: autoVerify,
+      ...(autoVerify && { emailVerifiedAt: new Date() })
+    });
+  }
 
   let token;
   let otp;
