@@ -39,15 +39,7 @@ describe('n_krypted MVP API', () => {
     expect(health.body.messageEn).toBe('n_krypted API is running');
   });
 
-  const verifyRegisteredUser = async (email, otp) => {
-    const verification = await request(app).post('/api/v1/auth/verify-email').send({ email, otp });
-    expect(verification.status).toBe(200);
-    expect(verification.body.data.accessToken).toBeTruthy();
-    expect(verification.body.data.refreshToken).toBeTruthy();
-    return verification.body.data;
-  };
-
-  it('registers admin, owner with pending restaurant, and customer accounts with OTP verification', async () => {
+  it('registers and signs in admin, owner, and customer accounts without signup OTP', async () => {
     const admin = await request(app).post('/api/v1/auth/register').send({
       name: 'Admin User',
       email: 'admin@example.com',
@@ -56,10 +48,11 @@ describe('n_krypted MVP API', () => {
     });
 
     expect(admin.status).toBe(201);
-    expect(admin.body.message).toBe('Registrierung erfolgreich. Bitte bestätigen Sie Ihre E-Mail-Adresse');
-    expect(admin.body.messageEn).toBe('Registration successful. Please verify your email');
-    const verifiedAdmin = await verifyRegisteredUser('admin@example.com', admin.body.data.otp.devOtp);
-    adminToken = verifiedAdmin.accessToken;
+    expect(admin.body.messageEn).toBe('Registration successful');
+    expect(admin.body.data.user.emailVerified).toBe(true);
+    expect(admin.body.data.accessToken).toBeTruthy();
+    expect(admin.body.data.refreshToken).toBeTruthy();
+    adminToken = admin.body.data.accessToken;
 
     const owner = await request(app).post('/api/v1/auth/register').send({
       name: 'Owner User',
@@ -85,8 +78,8 @@ describe('n_krypted MVP API', () => {
     ownerId = owner.body.data.user._id;
     restaurantId = owner.body.data.restaurant._id;
     expect(owner.body.data.restaurant.status).toBe('pending');
-    const verifiedOwner = await verifyRegisteredUser('owner@example.com', owner.body.data.otp.devOtp);
-    ownerToken = verifiedOwner.accessToken;
+    expect(owner.body.data.user.emailVerified).toBe(true);
+    ownerToken = owner.body.data.accessToken;
 
     const customer = await request(app).post('/api/v1/auth/register').send({
       name: 'Customer User',
@@ -97,9 +90,9 @@ describe('n_krypted MVP API', () => {
 
     expect(customer.status).toBe(201);
     customerId = customer.body.data.user._id;
-    const verifiedCustomer = await verifyRegisteredUser('customer@example.com', customer.body.data.otp.devOtp);
-    customerToken = verifiedCustomer.accessToken;
-    customerRefreshToken = verifiedCustomer.refreshToken;
+    expect(customer.body.data.user.emailVerified).toBe(true);
+    customerToken = customer.body.data.accessToken;
+    customerRefreshToken = customer.body.data.refreshToken;
   });
 
   it('refreshes access tokens and supports forgot-password OTP reset', async () => {
@@ -341,6 +334,22 @@ describe('n_krypted MVP API', () => {
   });
 
   it('supports the API contract used by the Flutter app and dashboard', async () => {
+    const signup = await request(app).post('/api/auth/register').send({
+      name: 'Flutter Signup User',
+      email: 'flutter-signup@example.com',
+      password: 'password123',
+      role: 'user'
+    });
+    expect(signup.status).toBe(201);
+    expect(signup.body.data.isVerified).toBe(true);
+    expect(signup.body.token).toBeTruthy();
+    expect(signup.body.otp).toBeUndefined();
+
+    const cleanupSignup = await request(app)
+      .delete('/api/auth/delete/user')
+      .set('Authorization', `Bearer ${signup.body.token}`);
+    expect(cleanupSignup.status).toBe(200);
+
     const login = await request(app).post('/api/auth/login').send({
       email: 'admin@example.com',
       password: 'password123'

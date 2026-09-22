@@ -62,7 +62,7 @@ const issueOtp = async (user, purpose) => {
 
 const getUserForOtp = async (email) => {
   return User.findOne({ email, status: { $ne: 'deleted' } }).select(
-    '+emailVerificationOtpHash +emailVerificationOtpExpiresAt +passwordResetOtpHash +passwordResetOtpExpiresAt +passwordResetTokenHash +passwordResetTokenExpiresAt +refreshTokenHash +refreshTokenExpiresAt'
+    '+passwordResetOtpHash +passwordResetOtpExpiresAt +passwordResetTokenHash +passwordResetTokenExpiresAt +refreshTokenHash +refreshTokenExpiresAt'
   );
 };
 
@@ -90,71 +90,57 @@ const authPayload = async (user, message, statusCode = StatusCodes.OK, restauran
 
 export const register = catchAsync(async (req, res) => {
   const { name, email, password, role = 'customer', phone, restaurant: restaurantInput } = req.body;
+  const normalizedEmail = email.toLowerCase();
+  let user = await User.findOne({ email: normalizedEmail }).select(
+    '+passwordHash +emailVerificationOtpHash +emailVerificationOtpExpiresAt'
+  );
 
-  if (role === 'admin') {
+  if (user) {
+    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    if (user.status === 'deleted' || user.emailVerified || user.role !== role || !passwordMatches) {
+      throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
+    }
+
+    user.name = name;
+    user.phone = phone;
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    user.emailVerificationOtpHash = undefined;
+    user.emailVerificationOtpExpiresAt = undefined;
+    await user.save();
+  } else if (role === 'admin') {
     const adminExists = await User.exists({ role: 'admin', status: { $ne: 'deleted' } });
     if (adminExists) {
       throw new ApiError(StatusCodes.FORBIDDEN, 'Admin registration is only available for the first admin account');
     }
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
-  const user = await User.create({ name, email, passwordHash, role, phone });
+  if (!user) {
+    const passwordHash = await bcrypt.hash(password, 12);
+    user = await User.create({
+      name,
+      email: normalizedEmail,
+      passwordHash,
+      role,
+      phone,
+      emailVerified: true,
+      emailVerifiedAt: new Date()
+    });
+  }
 
-  let restaurant;
+  let restaurant = role === 'restaurant_owner'
+    ? await Restaurant.findOne({ owner: user._id, status: { $ne: 'deleted' } })
+    : undefined;
   if (role === 'restaurant_owner' && restaurantInput) {
-    restaurant = await Restaurant.create({
+    restaurant ??= await Restaurant.create({
       ...restaurantInput,
       owner: user._id,
       status: 'pending'
     });
   }
 
-  const otp = issueOtp(user, 'email_verification');
-
-  sendSuccess(res, StatusCodes.CREATED, 'Registration successful. Please verify your email', {
-    user,
-    ...(restaurant && { restaurant }),
-    otp
-  });
-});
-
-export const verifyEmailOtp = catchAsync(async (req, res) => {
-  const { email, otp } = req.body;
-  const user = await getUserForOtp(email);
-
-  if (!user || !(await verifyOtpValue(otp, user.emailVerificationOtpHash, user.emailVerificationOtpExpiresAt))) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired OTP');
-  }
-
-  user.emailVerified = true;
-  user.emailVerifiedAt = new Date();
-  user.emailVerificationOtpHash = undefined;
-  user.emailVerificationOtpExpiresAt = undefined;
-  await user.save();
-
-  const restaurant = user.role === 'restaurant_owner'
-    ? await Restaurant.findOne({ owner: user._id, status: { $ne: 'deleted' } })
-    : undefined;
-
-  const payload = await authPayload(user, 'Email verified successfully', StatusCodes.OK, restaurant);
+  const payload = await authPayload(user, 'Registration successful', StatusCodes.CREATED, restaurant);
   sendSuccess(res, payload.statusCode, payload.message, payload.data);
-});
-
-export const resendVerificationOtp = catchAsync(async (req, res) => {
-  const user = await getUserForOtp(req.body.email);
-
-  if (!user) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'User not found');
-  }
-
-  if (user.emailVerified) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Email is already verified');
-  }
-
-  const otp = issueOtp(user, 'email_verification');
-
-  sendSuccess(res, StatusCodes.OK, 'Email verification OTP sent successfully', { otp });
 });
 
 export const login = catchAsync(async (req, res) => {
@@ -229,7 +215,7 @@ export const forgotPassword = catchAsync(async (req, res) => {
     return;
   }
 
-  const otp = issueOtp(user, 'password_reset');
+  const otp = await issueOtp(user, 'password_reset');
 
   sendSuccess(res, StatusCodes.OK, 'Password reset OTP sent successfully', { otp });
 });

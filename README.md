@@ -44,8 +44,6 @@ CLOUDINARY_API_SECRET=your_api_secret
 ## Main API Areas
 
 - `POST /api/v1/auth/register`
-- `POST /api/v1/auth/verify-email`
-- `POST /api/v1/auth/resend-verification-otp`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh-token`
 - `POST /api/v1/auth/forgot-password`
@@ -94,15 +92,14 @@ All API responses return German as the primary display message and English as a 
 
 Frontend should display `message` to users. Developers can use `messageEn` for debugging or support.
 
-## Auth, OTP, and Tokens
+## Auth and Tokens
 
-- Register creates the user and sends a 6-digit OTP to the user's email.
-- `POST /api/v1/auth/verify-email` verifies the signup OTP and returns `accessToken`, `refreshToken`, and `token` where `token` is an alias of `accessToken`.
-- Login requires verified email and returns a short-lived access token plus a long-lived refresh token.
+- Register creates a verified user and immediately returns `accessToken`, `refreshToken`, and `token`, where `token` is an alias of `accessToken`.
+- Login returns a short-lived access token plus a long-lived refresh token.
 - Frontend sends access token as `Authorization: Bearer <accessToken>`.
 - `POST /api/v1/auth/refresh-token` rotates the refresh token and returns a new access/refresh pair. The frontend should replace both stored tokens.
 - Forgot password flow: `forgot-password` sends OTP, `verify-password-reset-otp` returns a short-lived `resetToken`, and `reset-password` sets the new password.
-- Gmail SMTP is used through `GMAIL_SMTP_USER` and `GMAIL_SMTP_APP_PASSWORD`. Use a Gmail App Password, not the normal Gmail account password.
+- Gmail SMTP is used only for password-recovery OTP through `GMAIL_SMTP_USER` and `GMAIL_SMTP_APP_PASSWORD`. Use a Gmail App Password, not the normal Gmail account password.
 
 ## Customer Search Filters
 
