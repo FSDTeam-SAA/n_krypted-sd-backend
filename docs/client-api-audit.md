@@ -6,7 +6,7 @@ Both shipped clients resolve their backend base URL to `http://<host>:5000/api` 
 
 | Method | Path | Consumer | Access | Backend status |
 |---|---|---|---|---|
-| POST | `/auth/register` | Flutter | Public | Implemented |
+| POST | `/auth/register` | Flutter | Public | Implemented; creates a verified session and returns a token without signup OTP |
 | POST | `/auth/login` | Flutter, dashboard | Public | Implemented |
 | POST | `/auth/forgot-password` | Flutter, dashboard | Public | Implemented |
 | POST | `/auth/verify` | Flutter, dashboard | Public | Implemented |

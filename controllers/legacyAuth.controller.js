@@ -51,29 +51,42 @@ const validOtp = async (code, hash, expiresAt) => {
 
 export const legacyRegister = catchAsync(async (req, res) => {
   const role = req.body.role === 'restaurant_owner' ? 'restaurant_owner' : req.body.role === 'admin' ? 'admin' : 'customer';
-  if (await User.exists({ email: req.body.email.toLowerCase(), status: { $ne: 'deleted' } })) {
-    throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
-  }
+  const email = req.body.email.toLowerCase();
+  let user = await User.findOne({ email }).select(selectSecrets());
 
-  const autoVerify = role === 'restaurant_owner' || role === 'admin';
-  const user = await User.create({
-    name: req.body.name,
-    email: req.body.email,
-    passwordHash: await bcrypt.hash(req.body.password, 12),
-    phone: req.body.phoneNumber,
-    role,
-    emailVerified: autoVerify,
-    ...(autoVerify && { emailVerifiedAt: new Date() })
-  });
+  if (user) {
+    const passwordMatches = await bcrypt.compare(req.body.password, user.passwordHash);
+    if (user.status === 'deleted' || user.emailVerified || user.role !== role || !passwordMatches) {
+      throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
+    }
 
-  let token;
-  let otp;
-  if (autoVerify) {
-    ({ token } = await createAuthTokens(user));
+    // Recover accounts created before the previous SMTP-based signup failed.
+    // Requiring the same password prevents an unverified account takeover.
+    user.name = req.body.name;
+    user.phone = req.body.phoneNumber;
+    user.emailVerified = true;
+    user.emailVerifiedAt = new Date();
+    user.emailVerificationOtpHash = undefined;
+    user.emailVerificationOtpExpiresAt = undefined;
+    await user.save();
   } else {
-    otp = await setOtp(user, 'verify');
+    user = await User.create({
+      name: req.body.name,
+      email,
+      passwordHash: await bcrypt.hash(req.body.password, 12),
+      phone: req.body.phoneNumber,
+      role,
+      emailVerified: true,
+      emailVerifiedAt: new Date()
+    });
   }
-  sendLegacy(res, { data: legacyUser(user), token, otp }, StatusCodes.CREATED, 'Registration successful');
+
+  const tokens = await createAuthTokens(user);
+  sendLegacy(res, {
+    data: legacyUser(user),
+    token: tokens.token,
+    refreshToken: tokens.refreshToken
+  }, StatusCodes.CREATED, 'Registration successful');
 });
 
 export const legacyLogin = catchAsync(async (req, res) => {
