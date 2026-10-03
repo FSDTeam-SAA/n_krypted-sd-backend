@@ -5,6 +5,7 @@ import sendSuccess from '../utils/apiResponse.js';
 import CheckIn from '../models/checkIn.model.js';
 import Restaurant from '../models/restaurant.model.js';
 import RestaurantView from '../models/restaurantView.model.js';
+import { verifyCheckInLocation } from '../utils/checkInLocation.js';
 
 const findActiveRestaurant = async (id) => {
   const restaurant = await Restaurant.findOne({
@@ -23,13 +24,13 @@ const findActiveRestaurant = async (id) => {
 export const createCheckIn = catchAsync(async (req, res) => {
   const restaurant = await findActiveRestaurant(req.params.id);
   const { lat, lng } = req.body;
+  const { latitude, longitude, distance } = verifyCheckInLocation(restaurant.location, lat, lng);
 
   const checkIn = await CheckIn.create({
     user: req.user._id,
     restaurant: restaurant._id,
-    ...(lat !== undefined && lng !== undefined && {
-      location: { type: 'Point', coordinates: [Number(lng), Number(lat)] }
-    })
+    location: { type: 'Point', coordinates: [longitude, latitude] },
+    distanceMeters: distance
   });
 
   await Restaurant.findByIdAndUpdate(restaurant._id, { $inc: { checkInCount: 1 } });

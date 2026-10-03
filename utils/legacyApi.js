@@ -91,7 +91,7 @@ export const populateLegacyRestaurants = async (restaurants) => {
 };
 
 export const assertOwnerOrAdmin = (user, restaurant) => {
-  if (user.role !== 'admin' && String(restaurant.owner) !== String(user._id)) {
+  if (user.role !== 'admin' && String(restaurant.owner?._id || restaurant.owner) !== String(user._id)) {
     throw new ApiError(StatusCodes.FORBIDDEN, 'You cannot manage this restaurant');
   }
 };

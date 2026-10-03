@@ -43,7 +43,7 @@ export const restaurantDishesSchema = {
 export const createCheckInSchema = {
   params: idParam,
   body: z.object({
-    lat: z.coerce.number().min(-90).max(90).optional(),
-    lng: z.coerce.number().min(-180).max(180).optional()
+    lat: z.preprocess((value) => typeof value === 'string' && value.trim() ? Number(value) : value, z.number().finite().min(-90).max(90)),
+    lng: z.preprocess((value) => typeof value === 'string' && value.trim() ? Number(value) : value, z.number().finite().min(-180).max(180))
   })
 };

@@ -8,7 +8,8 @@ export const imageSchema = new mongoose.Schema(
     height: Number,
     format: String,
     bytes: Number,
-    alt: String
+    alt: String,
+    category: { type: String, enum: ['interior', 'exterior', 'other'], default: 'other' }
   },
   { _id: true }
 );
@@ -24,7 +25,8 @@ export const pointSchema = new mongoose.Schema(
       type: [Number],
       validate: {
         validator(value) {
-          return !value.length || value.length === 2;
+          return !value.length || (value.length === 2 && value.every(Number.isFinite)
+            && Math.abs(value[0]) <= 180 && Math.abs(value[1]) <= 90);
         },
         message: 'Coordinates must be [longitude, latitude]'
       },

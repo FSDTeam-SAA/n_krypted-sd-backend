@@ -65,7 +65,15 @@ import {
 const router = Router();
 const adminOnly = [protect, restrictTo('admin')];
 
-router.post('/auth/register', legacyRegister);
+router.post('/auth/register', (req, res, next) => {
+  const started = performance.now();
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    res.set('Server-Timing', `registration;dur=${(performance.now() - started).toFixed(1)}`);
+    return json(body);
+  };
+  next();
+}, legacyRegister);
 router.post('/auth/login', legacyLogin);
 router.post('/auth/forgot-password', legacyForgotPassword);
 router.post('/auth/verify', legacyVerify);
@@ -118,11 +126,11 @@ router.get('/dashboard/stats', protect, restrictTo('admin', 'restaurant_owner'),
 router.get('/manage/deals', protect, restrictTo('admin', 'restaurant_owner'), legacyManageRestaurants);
 router.get('/manage/deals/:id', protect, restrictTo('admin', 'restaurant_owner'), legacyManageRestaurant);
 router.get('/owner/restaurant', protect, restrictTo('restaurant_owner'), legacyGetOwnerRestaurant);
-router.post('/owner/restaurant', protect, restrictTo('restaurant_owner'), upload.array('images', 10), legacyCreateOwnerRestaurant);
-router.put('/owner/restaurant/:id', protect, restrictTo('restaurant_owner'), upload.array('images', 10), legacyResubmitOwnerRestaurant);
+router.post('/owner/restaurant', protect, restrictTo('restaurant_owner'), upload.array('images', 28), legacyCreateOwnerRestaurant);
+router.put('/owner/restaurant/:id', protect, restrictTo('restaurant_owner'), upload.array('images', 12), legacyResubmitOwnerRestaurant);
 
 router.post('/admin/restaurants', ...adminOnly, upload.array('images', 10), legacyCreateAdminRestaurant);
-router.put('/admin/restaurants/:id', protect, upload.array('images', 10), legacyUpdateRestaurant);
+router.put('/admin/restaurants/:id', protect, upload.array('images', 12), legacyUpdateRestaurant);
 router.patch('/admin/restaurants/:id/approval', ...adminOnly, legacyApproval);
 
 router.post('/restaurants/:id/dishes', protect, upload.array('images', 10), legacyAddDish);

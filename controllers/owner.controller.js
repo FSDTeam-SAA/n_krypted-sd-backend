@@ -1,6 +1,7 @@
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
+import { validateSignatureDish } from '../utils/restaurantSubmission.js';
 import sendSuccess from '../utils/apiResponse.js';
 import { getPagination, getPaginationMeta } from '../utils/pagination.js';
 import { deleteCloudinaryImage, streamUpload, toImageAsset } from '../utils/cloudinaryUpload.js';
@@ -209,6 +210,7 @@ export const listOwnerDishes = catchAsync(async (req, res) => {
 export const createOwnerDish = catchAsync(async (req, res) => {
   const restaurant = await getOwnerRestaurantOrFail(req.user._id);
   const updates = pick(req.body, allowedDishFields);
+  await validateSignatureDish(Dish, restaurant._id, updates);
 
   if (req.files?.length) {
     updates.images = await Promise.all(
@@ -242,6 +244,9 @@ export const getOwnerDish = catchAsync(async (req, res) => {
 export const updateOwnerDish = catchAsync(async (req, res) => {
   const restaurant = await getOwnerRestaurantOrFail(req.user._id);
   const updates = pick(req.body, allowedDishFields);
+  const existing = await Dish.findOne({ _id: req.params.id, restaurant: restaurant._id, status: { $ne: 'deleted' } });
+  if (!existing) throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
+  await validateSignatureDish(Dish, restaurant._id, { ...existing.toObject(), ...updates }, existing._id);
 
   if (req.files?.length) {
     updates.images = await Promise.all(

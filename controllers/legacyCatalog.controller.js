@@ -1,3 +1,4 @@
+import { verifyCheckInLocation } from '../utils/checkInLocation.js';
 import mongoose from 'mongoose';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
@@ -173,23 +174,12 @@ export const legacyUnsave = catchAsync(async (req, res) => {
   sendLegacy(res);
 });
 
-const radians = (degrees) => degrees * Math.PI / 180;
-const distanceMeters = (lat1, lng1, lat2, lng2) => {
-  const deltaLat = radians(lat2 - lat1);
-  const deltaLng = radians(lng2 - lng1);
-  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(radians(lat1)) * Math.cos(radians(lat2)) * Math.sin(deltaLng / 2) ** 2;
-  return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-};
-
 export const legacyCreateCheckIn = catchAsync(async (req, res) => {
   const restaurant = await Restaurant.findOne({ _id: req.body.restaurantId, ...activeRestaurants });
   if (!restaurant) throw new ApiError(StatusCodes.NOT_FOUND, 'Restaurant not found');
-  const latitude = Number(req.body.latitude);
-  const longitude = Number(req.body.longitude);
-  const coordinates = restaurant.location?.coordinates;
-  const distance = coordinates?.length === 2 && Number.isFinite(latitude) && Number.isFinite(longitude)
-    ? distanceMeters(latitude, longitude, coordinates[1], coordinates[0])
-    : 0;
+  const { latitude, longitude, distance } = verifyCheckInLocation(
+    restaurant.location, req.body.latitude, req.body.longitude
+  );
   const checkIn = await CheckIn.create({
     user: req.user._id,
     restaurant: restaurant._id,
