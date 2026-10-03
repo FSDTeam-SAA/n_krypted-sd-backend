@@ -94,6 +94,7 @@ export const legacyRestaurant = (value, dishes = []) => {
     rejectionReason: restaurant.rejectionReason,
     dishes: dishes.map(legacyDish),
     images: imageUrls(restaurant.gallery),
+    photoCategories: (restaurant.gallery || []).map((image) => image.category || 'other'),
     offers: restaurant.offers || [],
     status,
     category: category ? { _id: category, categoryName: category } : undefined,

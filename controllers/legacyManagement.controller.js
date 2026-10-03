@@ -18,6 +18,7 @@ import Dish from '../models/dish.model.js';
 import User from '../models/user.model.js';
 import Review from '../models/review.model.js';
 import SavedItem from '../models/savedItem.model.js';
+import { prepareRestaurantSubmission, categorizeRestaurantImages, validateRestaurantLocation, validateSignatureDish } from '../utils/restaurantSubmission.js';
 
 const getRestaurant = async (id) => {
   const restaurant = await Restaurant.findOne({ _id: id, status: { $ne: 'deleted' } }).populate('owner');
@@ -32,7 +33,7 @@ const withDishes = async (restaurant) => {
 
 const saveRestaurantImages = async (req, restaurantId) => {
   if (req.files?.length || req.body.existingImages !== undefined) {
-    return uploadedImages(req.files, `restaurants/${restaurantId}`, req.body.existingImages);
+    return categorizeRestaurantImages(req.body, await uploadedImages(req.files, `restaurants/${restaurantId}`, req.body.existingImages));
   }
   return undefined;
 };
@@ -70,13 +71,23 @@ export const legacyCreateOwnerRestaurant = catchAsync(async (req, res) => {
     throw new ApiError(StatusCodes.CONFLICT, 'Restaurant already exists for this owner');
   }
   const restaurant = new Restaurant({ ...restaurantInput(req.body), owner: req.user._id, status: 'pending' });
-  restaurant.gallery = await saveRestaurantImages(req, restaurant._id) || [];
-  await restaurant.save();
+  const submission = await prepareRestaurantSubmission(req, restaurant._id);
+  restaurant.gallery = submission.gallery;
+  restaurant.price = Math.min(...submission.dishes.map((dish) => dish.price));
+  try {
+    await restaurant.save();
+    await Dish.insertMany(submission.dishes);
+  } catch (error) {
+    await Dish.deleteMany({ restaurant: restaurant._id });
+    await Restaurant.deleteOne({ _id: restaurant._id });
+    throw error;
+  }
   await restaurant.populate('owner');
   sendLegacy(res, { restaurant: await withDishes(restaurant) }, StatusCodes.CREATED, 'Restaurant submitted');
 });
 
 export const legacyResubmitOwnerRestaurant = catchAsync(async (req, res) => {
+  validateRestaurantLocation(req.body);
   const restaurant = await getRestaurant(req.params.id);
   assertOwnerOrAdmin(req.user, restaurant);
   Object.assign(restaurant, restaurantInput(req.body));
@@ -116,6 +127,7 @@ export const legacyCreateAdminRestaurant = catchAsync(async (req, res) => {
 });
 
 export const legacyUpdateRestaurant = catchAsync(async (req, res) => {
+  if (req.body.location !== undefined) validateRestaurantLocation(req.body);
   const restaurant = await getRestaurant(req.params.id);
   assertOwnerOrAdmin(req.user, restaurant);
   Object.assign(restaurant, restaurantInput(req.body));
@@ -155,14 +167,19 @@ export const legacyBulkDeleteRestaurants = catchAsync(async (req, res) => {
 });
 
 const restaurantAfterDishMutation = async (restaurant) => {
+  const dishes = await Dish.find({ restaurant: restaurant._id, status: { $ne: 'deleted' } });
+  const prices = dishes.filter((dish) => dish.status === 'active').map((dish) => dish.price);
+  restaurant.price = prices.length ? Math.min(...prices) : 0;
+  await restaurant.save();
   await restaurant.populate('owner');
-  return withDishes(restaurant);
+  return legacyRestaurant(restaurant, dishes);
 };
 
 export const legacyAddDish = catchAsync(async (req, res) => {
   const restaurant = await getRestaurant(req.params.id);
   assertOwnerOrAdmin(req.user, restaurant);
   const dish = new Dish({ ...dishInput(req.body), restaurant: restaurant._id });
+  await validateSignatureDish(Dish, restaurant._id, dish);
   dish.images = await uploadedImages(req.files, `restaurants/${restaurant._id}/dishes`, req.body.existingImages);
   await dish.save();
   sendLegacy(res, { restaurant: await restaurantAfterDishMutation(restaurant) }, StatusCodes.CREATED, 'Dish created');
@@ -173,6 +190,7 @@ export const legacyUpdateDish = catchAsync(async (req, res) => {
   assertOwnerOrAdmin(req.user, restaurant);
   const dish = await Dish.findOne({ _id: req.params.dishId, restaurant: restaurant._id, status: { $ne: 'deleted' } });
   if (!dish) throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
+  await validateSignatureDish(Dish, restaurant._id, { ...dish.toObject(), ...dishInput(req.body) }, dish._id);
   Object.assign(dish, dishInput(req.body));
   if (req.files?.length || req.body.existingImages !== undefined) {
     dish.images = await uploadedImages(req.files, `restaurants/${restaurant._id}/dishes`, req.body.existingImages);
