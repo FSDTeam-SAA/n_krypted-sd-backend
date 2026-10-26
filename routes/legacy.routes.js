@@ -126,10 +126,10 @@ router.get('/dashboard/stats', protect, restrictTo('admin', 'restaurant_owner'),
 router.get('/manage/deals', protect, restrictTo('admin', 'restaurant_owner'), legacyManageRestaurants);
 router.get('/manage/deals/:id', protect, restrictTo('admin', 'restaurant_owner'), legacyManageRestaurant);
 router.get('/owner/restaurant', protect, restrictTo('restaurant_owner'), legacyGetOwnerRestaurant);
-router.post('/owner/restaurant', protect, restrictTo('restaurant_owner'), upload.array('images', 28), legacyCreateOwnerRestaurant);
+router.post('/owner/restaurant', protect, restrictTo('restaurant_owner'), upload.array('images', 24), legacyCreateOwnerRestaurant);
 router.put('/owner/restaurant/:id', protect, restrictTo('restaurant_owner'), upload.array('images', 12), legacyResubmitOwnerRestaurant);
 
-router.post('/admin/restaurants', ...adminOnly, upload.array('images', 10), legacyCreateAdminRestaurant);
+router.post('/admin/restaurants', ...adminOnly, upload.array('images', 12), legacyCreateAdminRestaurant);
 router.put('/admin/restaurants/:id', protect, upload.array('images', 12), legacyUpdateRestaurant);
 router.patch('/admin/restaurants/:id/approval', ...adminOnly, legacyApproval);
 

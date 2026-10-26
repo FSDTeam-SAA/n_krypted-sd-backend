@@ -39,12 +39,12 @@ afterAll(async () => {
 });
 
 const submission = (options = {}) => {
-  const dishes = Array.from({ length: options.dishCount ?? 4 }, (_, index) => ({
+  const dishes = Array.from({ length: options.dishCount ?? 3 }, (_, index) => ({
     name: `Signature ${index + 1}`, description: `Description ${index + 1}`,
     price: 10 + index, imageIndexes: [2 + index]
   }));
   let req = request(app).post('/api/owner/restaurant')
-    .set('Authorization', `Bearer ${ownerToken}`)
+    .set('Authorization', `Bearer ${options.token ?? ownerToken}`)
     .field('title', 'Feedback Restaurant')
     .field('description', 'A complete registration')
     .field('location', JSON.stringify(options.location ?? { address: 'Test street', city: 'Berlin', country: 'Deutschland', latitude: 52.52, longitude: 13.405 }))
@@ -62,13 +62,13 @@ test('invalid coordinates and incomplete photo sections fail before upload or DB
   expect(badLocation.status).toBe(400);
   const badPhotos = await submission({ photoCategories: ['interior', 'interior'] });
   expect(badPhotos.status).toBe(400);
-  const tooMany = await submission({ dishCount: 5 });
+  const tooMany = await submission({ dishCount: 4 });
   expect(tooMany.status).toBe(400);
   expect(upload).not.toHaveBeenCalled();
   expect(await mongoose.model('Restaurant').countDocuments()).toBe(0);
 });
 
-test('one owner submission saves four described dishes and correctly categorized photos', async () => {
+test('one owner submission saves three described dishes and correctly categorized photos', async () => {
   const response = await submission();
   expect(response.status).toBe(201);
   const restaurant = response.body.restaurant;
@@ -76,28 +76,39 @@ test('one owner submission saves four described dishes and correctly categorized
   expect(restaurant.approvalStatus).toBe('pending');
   expect(restaurant.photoCategories).toEqual(['interior', 'exterior']);
   expect(restaurant.images).toHaveLength(2);
-  expect(restaurant.dishes).toHaveLength(4);
+  expect(restaurant.dishes).toHaveLength(3);
   expect(restaurant.price).toBe(10);
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
     expect(restaurant.dishes[i].isSignatureDish).toBe(true);
     expect(restaurant.dishes[i].description).toBe(`Description ${i + 1}`);
     expect(restaurant.dishes[i].images).toEqual([`https://example.com/${Buffer.from(`photo-${i + 2}`).toString('hex')}.png`]);
   }
   const fetched = await request(app).get('/api/owner/restaurant').set('Authorization', `Bearer ${ownerToken}`);
   expect(fetched.body.restaurant.photoCategories).toEqual(['interior', 'exterior']);
-  expect(fetched.body.restaurant.dishes).toHaveLength(4);
+  expect(fetched.body.restaurant.dishes).toHaveLength(3);
 });
 
-test('owner cannot add a fifth signature dish through either API surface', async () => {
+test.each([1, 2])('registration also accepts %i signature dishes', async (dishCount) => {
+  const owner = await request(app).post('/api/auth/register').send({
+    name: `Owner ${dishCount}`, email: `owner-${dishCount}@feedback.example`,
+    password: 'password123', role: 'restaurant_owner'
+  });
+  expect(owner.status).toBe(201);
+  const response = await submission({ dishCount, token: owner.body.token });
+  expect(response.status).toBe(201);
+  expect(response.body.restaurant.dishes).toHaveLength(dishCount);
+});
+
+test('owner cannot add a fourth signature dish through either API surface', async () => {
   const legacy = await request(app).post(`/api/restaurants/${restaurantId}/dishes`)
     .set('Authorization', `Bearer ${ownerToken}`)
-    .send({ name: 'Fifth', description: 'Description', price: 15, isSignatureDish: true });
+    .send({ name: 'Fourth', description: 'Description', price: 15, isSignatureDish: true });
   expect(legacy.status).toBe(400);
   const native = await request(app).post('/api/v1/owner/dishes')
     .set('Authorization', `Bearer ${ownerToken}`)
-    .send({ name: 'Fifth', description: 'Description', price: 15, isSignature: true });
+    .send({ name: 'Fourth', description: 'Description', price: 15, isSignature: true });
   expect(native.status).toBe(400);
-  expect(await mongoose.model('Dish').countDocuments({ restaurant: restaurantId })).toBe(4);
+  expect(await mongoose.model('Dish').countDocuments({ restaurant: restaurantId })).toBe(3);
 });
 
 test('categorized restaurant photos survive edits and all signature dishes reach customer details', async () => {
@@ -109,7 +120,28 @@ test('categorized restaurant photos survive edits and all signature dishes reach
   await mongoose.model('Restaurant').findByIdAndUpdate(restaurantId, { status: 'active' });
   const details = await request(app).get(`/api/deals/${restaurantId}`);
   expect(details.status).toBe(200);
-  expect(details.body.deal.dishes).toHaveLength(4);
+  expect(details.body.deal.dishes).toHaveLength(3);
+});
+
+test('legacy edits without category metadata preserve categorized restaurant photos', async () => {
+  const edited = await request(app).put(`/api/admin/restaurants/${restaurantId}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .send({ title: 'Metadata edit', existingImages: ['https://example.com/inside.png', 'https://example.com/outside.png'] });
+  expect(edited.status).toBe(200);
+  expect(edited.body.restaurant.photoCategories).toEqual(['interior', 'exterior']);
+  const saved = await mongoose.model('Restaurant').findById(restaurantId);
+  expect(saved.gallery.map((image) => image.category)).toEqual(['interior', 'exterior']);
+});
+
+test('dashboard multipart edits categorize retained photos before new uploads', async () => {
+  const response = await request(app).put(`/api/admin/restaurants/${restaurantId}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .field('existingImages', JSON.stringify(['https://example.com/inside.png', 'https://example.com/outside.png']))
+    .field('photoCategories', JSON.stringify(['interior', 'exterior', 'other']))
+    .attach('images', Buffer.from('terrace'), { filename: 'terrace.png', contentType: 'image/png' });
+  expect(response.status).toBe(200);
+  expect(response.body.restaurant.photoCategories).toEqual(['interior', 'exterior', 'other']);
+  expect(response.body.restaurant.images[2]).toBe(`https://example.com/${Buffer.from('terrace').toString('hex')}.png`);
 });
 
 test('check-in rejects missing/far GPS data and accepts a nearby customer', async () => {

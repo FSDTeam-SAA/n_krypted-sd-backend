@@ -33,7 +33,13 @@ const withDishes = async (restaurant) => {
 
 const saveRestaurantImages = async (req, restaurantId) => {
   if (req.files?.length || req.body.existingImages !== undefined) {
-    return categorizeRestaurantImages(req.body, await uploadedImages(req.files, `restaurants/${restaurantId}`, req.body.existingImages));
+    const images = await uploadedImages(req.files, `restaurants/${restaurantId}`, req.body.existingImages);
+    if (req.body.photoCategories === undefined) {
+      const existing = await Restaurant.findById(restaurantId).select('gallery');
+      const byUrl = new Map((existing?.gallery || []).map((image) => [image.secure_url, image]));
+      return images.map((image) => byUrl.get(image.secure_url)?.toObject() || image);
+    }
+    return categorizeRestaurantImages(req.body, images);
   }
   return undefined;
 };

@@ -11,6 +11,7 @@ import SavedItem from '../models/savedItem.model.js';
 import StaticPage from '../models/staticPage.model.js';
 import User from '../models/user.model.js';
 import { recalculateDishRating, recalculateRestaurantRating } from '../utils/recalculateRatings.js';
+import oldTownDemo, { demoDish, demoGallery } from './data/old-town-demo.js';
 
 const password = 'Password123!';
 const owners = [
@@ -41,7 +42,7 @@ const dishSeeds = [
   [['Garden Club Sandwich', 320, 'Sandwich', true], ['Pasta Alfredo', 410, 'Pasta', false], ['Cold Coffee', 190, 'Beverage', false]],
   [['Mutton Rezala', 560, 'Main Course', true], ['Morog Polao', 420, 'Main Course', false], ['Shahi Tukra', 180, 'Dessert', false]]
 ];
-// Populate the client's full four-signature layout as well as regular dishes.
+// Populate the client's full three-signature layout as well as regular dishes.
 const additionalSignatures = [
   [['Chicken Roast', 360, 'Main Course'], ['Chingri Malai Curry', 480, 'Main Course'], ['Firni', 140, 'Dessert']],
   [['Kosha Mangsho', 490, 'Main Course'], ['Prawn Paturi', 450, 'Main Course'], ['Sandesh', 150, 'Dessert']],
@@ -50,9 +51,11 @@ const additionalSignatures = [
   [['Beef Tehari', 390, 'Main Course'], ['Chicken Korma', 460, 'Main Course'], ['Zarda', 160, 'Dessert']]
 ];
 additionalSignatures.forEach((extra, index) => {
-  dishSeeds[index].push(...extra.map((dish) => [...dish, true]));
+  if (restaurantSeeds[index][0] === oldTownDemo.name) return;
+  dishSeeds[index].push(...extra.map((dish, dishIndex) => [...dish, dishIndex < 2]));
 });
 const photoIds = ['photo-1517248135467-4c7edcad34c4', 'photo-1552566626-52f8b828add9', 'photo-1555396273-367ea4eb4db5', 'photo-1559339352-11d035aa65de', 'photo-1414235077428-338989a2e8c0'];
+const dishPhotoIds = ['photo-1546069901-ba9599a7e63c', 'photo-1565299624946-b28f40a0ae38', 'photo-1565958011703-44f9829ba187', 'photo-1555939594-58d7cb561ad1', 'photo-1567620905732-2d1ec7ab7445', 'photo-1568901346375-23c9450c58cd'];
 const image = (id, photoId, alt) => ({ public_id: `seed/${id}`, secure_url: `https://images.unsplash.com/${photoId}?auto=format&fit=crop&w=1200&q=80`, width: 1200, height: 800, format: 'jpg', alt });
 const openingHours = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map((day) => ({ day, open: '10:00', close: '23:00', closed: false }));
 
@@ -86,12 +89,29 @@ const upsertRestaurantsAndDishes = async (ownerUsers) => {
       { upsert: true, new: true, runValidators: true }
     );
     restaurants.push(restaurant);
+    const curatedDemo = name === oldTownDemo.name;
+    if (curatedDemo) {
+      restaurant.description = oldTownDemo.description;
+      restaurant.shortDescription = oldTownDemo.shortDescription;
+      restaurant.price = Math.min(...oldTownDemo.dishes.map((dish) => dish.price));
+      restaurant.gallery = demoGallery();
+      await restaurant.save();
+    }
     const restaurantDishes = [];
     for (let j = 0; j < dishSeeds[i].length; j += 1) {
       const [dishName, price, dishCategory, isSignature] = dishSeeds[i][j];
+      if (curatedDemo) {
+        const dish = await Dish.findOneAndUpdate(
+          { restaurant: restaurant._id, name: dishName },
+          { $set: { ...demoDish(oldTownDemo.dishes[j], j), restaurant: restaurant._id } },
+          { upsert: true, new: true, runValidators: true }
+        );
+        restaurantDishes.push(dish);
+        continue;
+      }
       const dish = await Dish.findOneAndUpdate(
         { restaurant: restaurant._id, name: dishName },
-        { $set: { description: `${dishName} made to order with carefully selected ingredients.`, price, category: dishCategory, specialtyDescription: isSignature ? `The signature dish of ${name}` : '', images: [image(`dish-${i + 1}-${j + 1}`, photoIds[(i + j) % photoIds.length], dishName)], ingredients: ['Fresh ingredients', 'House spices', 'Herbs'], nutrition: { calories: 350 + j * 120, protein: '18g', carbs: '42g', fat: '14g' }, preparationMethod: 'Prepared fresh in the restaurant kitchen.', isSignature, status: 'active' } },
+        { $set: { description: `${dishName} made to order with carefully selected ingredients.`, price, category: dishCategory, specialtyDescription: isSignature ? `The signature dish of ${name}` : '', images: [image(`dish-${i + 1}-${j + 1}`, dishPhotoIds[(i + j) % dishPhotoIds.length], dishName)], ingredients: ['Fresh ingredients', 'House spices', 'Herbs'], nutrition: { calories: 350 + j * 120, protein: '18g', carbs: '42g', fat: '14g' }, preparationMethod: 'Prepared fresh in the restaurant kitchen.', isSignature, status: 'active' } },
         { upsert: true, new: true, runValidators: true }
       );
       restaurantDishes.push(dish);

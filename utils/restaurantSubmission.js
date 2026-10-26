@@ -14,7 +14,7 @@ const signatureSchema = z.array(z.object({
   ingredients: z.array(z.string()).optional(),
   preparationProcess: z.string().optional(),
   imageIndexes: z.array(z.number().int().min(0)).min(1).max(4)
-})).min(1).max(4);
+})).min(1).max(3);
 
 export const validateRestaurantLocation = (body) => {
   const location = parseJson(body.location, null);
@@ -29,7 +29,7 @@ export const prepareRestaurantSubmission = async (req, restaurantId) => {
   const count = Number(req.body.restaurantImageCount);
   const parsed = signatureSchema.safeParse(parseJson(req.body.signatureDishes, null));
   if (!parsed.success) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Bitte 1 bis 4 Signature-Gerichte mit Beschreibung, Preis und jeweils 1 bis 4 Fotos hinzufügen.');
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Bitte 1 bis 3 Signature-Gerichte mit Beschreibung, Preis und jeweils 1 bis 4 Fotos hinzufügen.');
   }
   if (!Number.isInteger(count) || count < 2 || count > 12 || count > files.length) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Bitte Restaurantfotos getrennt von Gerichtsfotos hochladen.');
@@ -78,7 +78,7 @@ export const validateSignatureDish = async (Dish, restaurantId, updates, dishId)
   }
   const filters = { restaurant: restaurantId, isSignature: true, status: { $ne: 'deleted' } };
   if (dishId) filters._id = { $ne: dishId };
-  if (await Dish.countDocuments(filters) >= 4) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Maximal 4 Signature-Gerichte pro Restaurant.');
+  if (await Dish.countDocuments(filters) >= 3) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Maximal 3 Signature-Gerichte pro Restaurant.');
   }
 };
