@@ -3,3 +3,7 @@ config.bat
 branch_structure.json
 temp_auto_push.bat
 temp_interactive_push.bat
+
+# Local environment files contain credentials and must never be committed.
+!.env.example
+*.env
