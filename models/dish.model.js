@@ -19,6 +19,8 @@ const dishSchema = new mongoose.Schema(
     description: { type: String, trim: true },
     price: { type: Number, required: true, min: 0 },
     category: { type: String, trim: true },
+    tags: [{ type: String, trim: true }],
+    leadImage: { type: String, default: '' },
     specialtyDescription: { type: String, trim: true },
     images: [imageSchema],
     ingredients: [{ type: String, trim: true }],

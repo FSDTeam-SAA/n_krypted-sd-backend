@@ -1,4 +1,4 @@
-import { verifyCheckInLocation } from '../utils/checkInLocation.js';
+import { verifyCheckInLocation, validCoordinate } from '../utils/checkInLocation.js';
 import mongoose from 'mongoose';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
@@ -19,11 +19,26 @@ import CheckIn from '../models/checkIn.model.js';
 import Review from '../models/review.model.js';
 import User from '../models/user.model.js';
 import StaticPage from '../models/staticPage.model.js';
+import CatalogEntry from '../models/catalogEntry.model.js';
+import RestaurantView from '../models/restaurantView.model.js';
+import { isOpenNow, defaultTags } from '../utils/discovery.js';
+import { cleanHtml, validate } from '../utils/content.js';
+import { publicReviewVisibility } from '../utils/reviewVisibility.js';
+import { z } from 'zod';
 
 const activeRestaurants = { status: 'active', deletedAt: { $exists: false } };
 const activeDishes = { status: 'active', deletedAt: { $exists: false } };
 
 const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const discoveryQuery = z.object({
+  title: z.string().max(300).optional(), search: z.string().max(300).optional(),
+  category: z.string().max(120).optional(), cuisine: z.string().max(120).optional(),
+  city: z.string().max(120).optional(), country: z.string().max(120).optional(), location: z.string().max(300).optional(),
+  minimumRating: z.coerce.number().finite().min(0).max(5).optional(), minRating: z.coerce.number().finite().min(0).max(5).optional(),
+  priceRange: z.enum(['$', '$$', '$$$', '$$$$']).optional(), minPrice: z.coerce.number().finite().min(0).optional(), maxPrice: z.coerce.number().finite().min(0).optional(),
+  tags: z.string().max(2000).optional(), recommendation: z.string().max(50).optional(), availability: z.enum(['active', 'upcoming']).optional(),
+  openNow: z.enum(['true', 'false']).optional(), sort: z.string().max(30).optional(), radiusKm: z.coerce.number().finite().min(.1).max(100).optional()
+}).refine((value) => value.minPrice === undefined || value.maxPrice === undefined || value.minPrice <= value.maxPrice, 'Minimum price must not exceed maximum price');
 
 const restaurantFilters = (query) => {
   const filters = { ...activeRestaurants };
@@ -40,11 +55,21 @@ const restaurantFilters = (query) => {
   }
   if (query.city) filters.city = new RegExp(escapeRegex(query.city), 'i');
   if (query.country) filters.country = new RegExp(escapeRegex(query.country), 'i');
-  if (query.location) filters.$or = [
+  if (query.location) filters.$and = [{ $or: [
     { address: new RegExp(escapeRegex(query.location), 'i') },
     { city: new RegExp(escapeRegex(query.location), 'i') },
     { country: new RegExp(escapeRegex(query.location), 'i') }
-  ];
+  ] }];
+  if (query.priceRange) filters.priceRange = query.priceRange;
+  if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+    filters.price = {};
+    for (const [key, operator] of [['minPrice', '$gte'], ['maxPrice', '$lte']]) {
+      if (query[key] !== undefined) {
+        if (!Number.isFinite(Number(query[key])) || Number(query[key]) < 0) throw new ApiError(400, 'Invalid price filter');
+        filters.price[operator] = Number(query[key]);
+      }
+    }
+  }
   if (query.availability === 'upcoming') filters.opensAt = { $gt: new Date() };
   if (query.availability === 'active') {
     filters.$and = [...(filters.$and || []), { $or: [{ opensAt: { $exists: false } }, { opensAt: null }, { opensAt: { $lte: new Date() } }] }];
@@ -60,35 +85,32 @@ const dealSort = (sort) => ({
   rating: { ratingAverage: -1, ratingCount: -1 },
   newest: { createdAt: -1 },
   popular: { checkInCount: -1, viewCount: -1 }
+  ,priceAsc: { price: 1 }, priceDesc: { price: -1 }, nearest: { distanceMeters: 1 }
 }[sort] || { ratingAverage: -1, createdAt: -1 });
 
 export const legacyListDeals = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filters = restaurantFilters(req.query);
-  const latitude = Number(req.query.latitude);
-  const longitude = Number(req.query.longitude);
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-    filters.location = {
-      $near: {
-        $geometry: { type: 'Point', coordinates: [longitude, latitude] },
-        $maxDistance: (Number(req.query.radiusKm) || 25) * 1000
-      }
-    };
+  const filters = restaurantFilters(validate(discoveryQuery, req.query));
+  const hasLocation = req.query.latitude !== undefined || req.query.longitude !== undefined;
+  if (hasLocation && (!validCoordinate(req.query.latitude, 90) || !validCoordinate(req.query.longitude, 180))) throw new ApiError(400, 'Invalid coordinates');
+  if (req.query.openNow === 'true') {
+    const candidates = await Restaurant.find(filters).select('_id openingHours opensAt timeZone').lean();
+    filters._id = { $in: candidates.filter((r) => isOpenNow(r)).map((r) => r._id) };
   }
-  let query = Restaurant.find(filters).populate('owner', 'name email phone avatar country cityState');
-  if (!filters.location?.$near) query = query.sort(dealSort(req.query.sort));
-  const [restaurants, total] = await Promise.all([
-    query.skip(skip).limit(limit),
-    Restaurant.countDocuments(filters)
-  ]);
+  if (req.query.tags) {
+    const ids = await Dish.distinct('restaurant', { ...activeDishes, tags: { $all: String(req.query.tags).split(',') } });
+    filters.$and = [...(filters.$and || []), { _id: { $in: ids } }];
+  }
+  const pipeline = hasLocation ? [{ $geoNear: { near: { type: 'Point', coordinates: [Number(req.query.longitude), Number(req.query.latitude)] }, distanceField: 'distanceMeters', maxDistance: Math.max(.1, Math.min(100, Number(req.query.radiusKm) || 25)) * 1000, spherical: true, query: filters } }] : [{ $match: filters }];
+  pipeline.push({ $sort: { ...dealSort(req.query.sort), _id: 1 } }, { $facet: { rows: [{ $skip: skip }, { $limit: limit }], count: [{ $count: 'total' }] } });
+  const [result] = await Restaurant.aggregate(pipeline);
+  const restaurants = await Restaurant.populate(result.rows, { path: 'owner', select: 'name' });
   const deals = await populateLegacyRestaurants(restaurants);
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-    deals.forEach((deal) => {
-      if (Number.isFinite(deal.location.latitude) && Number.isFinite(deal.location.longitude)) {
-        deal.distanceKm = distanceMeters(latitude, longitude, deal.location.latitude, deal.location.longitude) / 1000;
-      }
-    });
-  }
+  deals.forEach((deal, index) => {
+    if (hasLocation) deal.distanceKm = result.rows[index].distanceMeters / 1000;
+    deal.isOpenNow = isOpenNow(result.rows[index]);
+  });
+  const total = result.count[0]?.total || 0;
   sendLegacy(res, { deals, pagination: legacyMeta(total, page, limit) });
 });
 
@@ -96,8 +118,8 @@ export const legacyGetDeal = catchAsync(async (req, res) => {
   const restaurant = await Restaurant.findOne({ _id: req.params.id, ...activeRestaurants })
     .populate('owner', 'name email phone avatar country cityState');
   if (!restaurant) throw new ApiError(StatusCodes.NOT_FOUND, 'Restaurant not found');
-  const dishes = await Dish.find({ restaurant: restaurant._id, status: { $ne: 'deleted' } });
-  sendLegacy(res, { deal: legacyRestaurant(restaurant, dishes) });
+  const [deal] = await populateLegacyRestaurants([restaurant]);
+  sendLegacy(res, { deal: { ...deal, isOpenNow: isOpenNow(restaurant) } });
 });
 
 export const legacyCategories = catchAsync(async (req, res) => {
@@ -117,11 +139,16 @@ export const legacyDiscoveryOptions = catchAsync(async (req, res) => {
     Restaurant.distinct('city', activeRestaurants),
     Restaurant.distinct('country', activeRestaurants)
   ]);
+  const entries = await CatalogEntry.find({});
+  const managedNames = (kind) => new Set(entries.filter((e) => e.kind === kind).flatMap((e) => [e.name, ...(e.previousNames || [])]));
+  const managedCities = managedNames('city');
+  const managedTags = managedNames('tag');
   sendLegacy(res, {
     cuisines: cuisines.filter(Boolean).sort(),
-    cities: cities.filter(Boolean).sort(),
+    cities: [...new Set([...cities.filter((name) => !managedCities.has(name)), ...entries.filter((e) => e.kind === 'city' && e.active).map((e) => e.name)])].filter(Boolean).sort(),
+    tags: [...new Set([...defaultTags.filter((name) => !managedTags.has(name)), ...entries.filter((e) => e.kind === 'tag' && e.active).map((e) => e.name)])].sort(),
     countries: countries.filter(Boolean).sort(),
-    sorts: ['rating', 'popular', 'newest']
+    sorts: ['rating', 'priceAsc', 'priceDesc', 'nearest', 'popular', 'newest']
   });
 });
 
@@ -222,21 +249,31 @@ export const legacyOwnerCheckIns = catchAsync(async (req, res) => {
 export const legacyAdminCheckIns = catchAsync(async (req, res) => sendLegacy(res, await listCheckIns(req, {})));
 export const legacyUserCheckIns = catchAsync(async (req, res) => sendLegacy(res, await listCheckIns(req, { user: req.params.userId })));
 
-const reviewQuery = (req) => {
+const reviewQuery = async (req) => {
   const filters = req.user?.role === 'admin'
     ? { status: { $ne: 'deleted' } }
     : { status: 'active' };
   if (req.query.dealId) filters.restaurant = req.query.dealId;
   if (req.query.userId) filters.user = req.query.userId;
+  if (req.query.mine === 'true') {
+    if (!req.user) throw new ApiError(401, 'Sign in required');
+    filters.user = req.user._id;
+    filters.reviewType = 'customer';
+    filters.status = { $ne: 'deleted' };
+  }
+  if (req.user?.role !== 'admin') {
+    Object.assign(filters, await publicReviewVisibility());
+  }
   return filters;
 };
 
 export const legacyListReviews = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filters = reviewQuery(req);
+  const filters = await reviewQuery(req);
   const [reviews, total] = await Promise.all([
     Review.find(filters)
       .populate('user')
+      .populate('adminAuthor', 'name')
       .populate('restaurant')
       .populate('dish')
       .populate('checkIn')
@@ -249,8 +286,8 @@ export const legacyListReviews = catchAsync(async (req, res) => {
 });
 
 export const legacyReviewsByDeal = catchAsync(async (req, res) => {
-  const reviews = await Review.find({ restaurant: req.params.dealId, status: 'active' })
-    .populate('user restaurant dish checkIn')
+  const reviews = await Review.find({ ...await reviewQuery(req), restaurant: req.params.dealId, status: 'active' })
+    .populate('user restaurant dish checkIn adminAuthor')
     .sort({ createdAt: -1 });
   sendLegacy(res, { reviews: reviews.map(legacyReview) });
 });
@@ -273,10 +310,13 @@ export const legacyCreateReview = catchAsync(async (req, res) => {
   const checkInId = req.body.checkInID || req.body.checkInId;
   const checkIn = await CheckIn.findOne({ _id: checkInId, user: req.user._id, restaurant: restaurantId });
   if (!checkIn) throw new ApiError(StatusCodes.FORBIDDEN, 'A valid check-in is required');
+  if (!await Restaurant.exists({ _id: restaurantId, ...activeRestaurants })) throw new ApiError(404, 'Restaurant not found');
+  const dishId = req.body.dishID || req.body.dishId;
+  if (dishId && !await Dish.exists({ _id: dishId, restaurant: restaurantId, ...activeDishes })) throw new ApiError(400, 'Dish does not belong to restaurant');
   const review = await Review.create({
     user: req.user._id,
     restaurant: restaurantId,
-    dish: req.body.dishID || req.body.dishId || undefined,
+    dish: dishId || undefined,
     checkIn: checkIn._id,
     rating: Number(req.body.ratings || req.body.rating),
     comment: req.body.reviewComment || req.body.comment || ''
@@ -287,10 +327,15 @@ export const legacyCreateReview = catchAsync(async (req, res) => {
 });
 
 export const legacyUpdateReview = catchAsync(async (req, res) => {
-  const review = await Review.findById(req.params.id);
+  const review = await Review.findOne({ _id: req.params.id, status: { $ne: 'deleted' } });
   if (!review) throw new ApiError(StatusCodes.NOT_FOUND, 'Review not found');
   if (req.user.role !== 'admin' && String(review.user) !== String(req.user._id)) {
     throw new ApiError(StatusCodes.FORBIDDEN, 'You cannot edit this review');
+  }
+  if (req.user.role === 'admin' && review.reviewType === 'customer') {
+    if (!review.originalReview?.rating) review.originalReview = { rating: review.rating, comment: review.comment, images: review.images, status: review.status };
+    review.overriddenBy = req.user._id;
+    review.overriddenAt = new Date();
   }
   if (req.body.reviewComment !== undefined || req.body.comment !== undefined) review.comment = req.body.reviewComment ?? req.body.comment;
   if (req.body.ratings !== undefined || req.body.rating !== undefined) review.rating = Number(req.body.ratings ?? req.body.rating);
@@ -314,11 +359,15 @@ export const legacyDeleteReview = catchAsync(async (req, res) => {
 });
 
 export const legacyBulkDeleteReviews = catchAsync(async (req, res) => {
-  const ids = (req.body.ids || []).filter((id) => mongoose.isValidObjectId(id));
+  if (!Array.isArray(req.body.ids) || req.body.ids.length > 1000) throw new ApiError(400, 'Provide up to 1000 review IDs');
+  const ids = req.body.ids.filter((id) => typeof id === 'string' && mongoose.isValidObjectId(id));
+  const reviews = await Review.find({ _id: { $in: ids }, status: { $ne: 'deleted' } }).select('restaurant dish');
   const result = await Review.updateMany(
     { _id: { $in: ids }, status: { $ne: 'deleted' } },
     { status: 'deleted', deletedAt: new Date() }
   );
+  const targets = new Map(reviews.map((review) => [`${review.restaurant}:${review.dish || ''}`, review]));
+  await Promise.all([...targets.values()].map(recalculateReviewTargets));
   sendLegacy(res, { deletedCount: result.modifiedCount, skippedCount: ids.length - result.modifiedCount });
 });
 
@@ -357,11 +406,12 @@ export const legacyReviewRestaurantSummaries = catchAsync(async (req, res) => {
 });
 
 export const legacyGetLegal = catchAsync(async (req, res) => {
-  const pages = await StaticPage.find({ slug: { $in: ['terms', 'privacy'] } });
+  const pages = await StaticPage.find({ slug: { $in: ['terms', 'privacy', 'impressum'] } });
   const bySlug = new Map(pages.map((page) => [page.slug, page]));
   sendLegacy(res, { content: {
     termsHtml: bySlug.get('terms')?.content || '',
     privacyHtml: bySlug.get('privacy')?.content || '',
+    impressumHtml: bySlug.get('impressum')?.content || '',
     updatedAt: pages.sort((a, b) => b.updatedAt - a.updatedAt)[0]?.updatedAt || null
   } });
 });
@@ -370,28 +420,25 @@ export const legacyUpdateLegal = catchAsync(async (req, res) => {
   const operations = [];
   if (req.body.termsHtml !== undefined) operations.push(StaticPage.findOneAndUpdate(
     { slug: 'terms' },
-    { title: 'Terms and Conditions', content: req.body.termsHtml },
+    { title: 'Terms and Conditions', content: cleanHtml(req.body.termsHtml) },
     { upsert: true, new: true, runValidators: true }
   ));
   if (req.body.privacyHtml !== undefined) operations.push(StaticPage.findOneAndUpdate(
     { slug: 'privacy' },
-    { title: 'Privacy Policy', content: req.body.privacyHtml },
+    { title: 'Privacy Policy', content: cleanHtml(req.body.privacyHtml) },
     { upsert: true, new: true, runValidators: true }
   ));
+  if (req.body.impressumHtml !== undefined) operations.push(StaticPage.findOneAndUpdate({ slug: 'impressum' }, { title: 'Impressum', content: cleanHtml(req.body.impressumHtml) }, { upsert: true, new: true, runValidators: true }));
   await Promise.all(operations);
-  const pages = await StaticPage.find({ slug: { $in: ['terms', 'privacy'] } });
+  const pages = await StaticPage.find({ slug: { $in: ['terms', 'privacy', 'impressum'] } });
   const bySlug = new Map(pages.map((page) => [page.slug, page]));
   sendLegacy(res, { content: {
     termsHtml: bySlug.get('terms')?.content || '',
     privacyHtml: bySlug.get('privacy')?.content || '',
+    impressumHtml: bySlug.get('impressum')?.content || '',
     updatedAt: new Date()
   } });
 });
-
-export const legacyAppSettings = catchAsync(async (req, res) => sendLegacy(res, { settings: {
-  instagramUrl: process.env.INSTAGRAM_URL || '',
-  tiktokUrl: process.env.TIKTOK_URL || ''
-} }));
 
 export const legacyDashboardStats = catchAsync(async (req, res) => {
   const restaurantFilter = req.user.role === 'restaurant_owner'
@@ -399,6 +446,7 @@ export const legacyDashboardStats = catchAsync(async (req, res) => {
     : { status: { $ne: 'deleted' } };
   const restaurants = await Restaurant.find(restaurantFilter).select('_id status');
   const restaurantIds = restaurants.map((restaurant) => restaurant._id);
+  const totalViews = await RestaurantView.countDocuments({ restaurant: { $in: restaurantIds } });
   const reviewFilter = req.user.role === 'restaurant_owner' ? { restaurant: { $in: restaurantIds }, status: { $ne: 'deleted' } } : { status: { $ne: 'deleted' } };
   const checkInFilter = req.user.role === 'restaurant_owner' ? { restaurant: { $in: restaurantIds } } : {};
   const [totalCustomers, totalReviews, totalCheckIns, customerGrowth] = await Promise.all([
@@ -415,6 +463,7 @@ export const legacyDashboardStats = catchAsync(async (req, res) => {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   sendLegacy(res, { data: {
     totalCustomers,
+    totalViews,
     totalDeals: restaurants.length,
     totalReviews,
     totalCheckIns,

@@ -1,5 +1,10 @@
 # Client feedback update — 2 October 2026
 
+The 2 November 2026 agreed-feature update supersedes the older photo limits,
+restaurant-card image description and map provider notes below. See
+[`implementation-2026-11-02.md`](implementation-2026-11-02.md) for the current
+implementation, configuration requirements and remaining release checks.
+
 The mobile registration now collects restaurant details, a confirmed map location,
 separate restaurant photo sections, and 1–3 described Signature Dishes in one
 submission. Restaurant prices on cards derive from dish prices rather than a

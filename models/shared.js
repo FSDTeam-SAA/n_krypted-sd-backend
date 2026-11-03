@@ -38,6 +38,8 @@ export const pointSchema = new mongoose.Schema(
 
 export const stripPrivateFields = (doc, ret) => {
   delete ret.passwordHash;
+  delete ret.googleSubject;
+  delete ret.appleSubject;
   delete ret.emailVerificationOtpHash;
   delete ret.emailVerificationOtpExpiresAt;
   delete ret.passwordResetOtpHash;

@@ -131,6 +131,7 @@ export const uploadRestaurantGallery = catchAsync(async (req, res) => {
   if (!req.files?.length) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Please upload at least one image file');
   }
+  if (restaurant.gallery.length + req.files.length > 10) throw new ApiError(400, 'Maximal 10 Restaurantfotos.');
 
   const images = await Promise.all(
     req.files.map(async (file) => toImageAsset(await streamUpload(file.buffer, `restaurants/${restaurant._id}`)))

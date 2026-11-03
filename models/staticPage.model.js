@@ -3,7 +3,7 @@ import { stripPrivateFields } from './shared.js';
 
 const staticPageSchema = new mongoose.Schema(
   {
-    slug: { type: String, enum: ['terms', 'privacy'], required: true, unique: true },
+    slug: { type: String, enum: ['terms', 'privacy', 'impressum'], required: true, unique: true },
     title: { type: String, required: true, trim: true },
     content: { type: String, required: true }
   },

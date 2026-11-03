@@ -82,7 +82,7 @@ const upsertRestaurantsAndDishes = async (ownerUsers) => {
     const restaurant = await Restaurant.findOneAndUpdate(
       { owner: ownerUsers[i]._id },
       { $set: { name, shortDescription: `${category} food prepared with fresh ingredients`, email: `restaurant${i + 1}@example.com`, phone: `+880180000030${i + 1}`, address, city: 'Dhaka', country: 'Bangladesh', description: `${name} serves authentic ${category} dishes in a welcoming, family-friendly setting.`, price: 500 + i * 100, location: { type: 'Point', coordinates }, categories: [category, 'Popular', 'Family Friendly'], priceRange, openingHours, reservationRequired: i % 2 === 1, gallery: ['interior', 'exterior', 'other'].flatMap((category, section) =>
-          Array.from({ length: 4 }, (_, photo) => ({
+          Array.from({ length: category === 'other' ? 2 : 4 }, (_, photo) => ({
             ...image(`restaurant-${i + 1}-${category}-${photo + 1}`, photoIds[(i + section + photo) % photoIds.length], `${name}: ${category} ${photo + 1}`),
             category
           }))), offers: [offer], status: 'active' } },

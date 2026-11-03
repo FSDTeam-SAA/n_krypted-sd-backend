@@ -7,6 +7,7 @@ import {
   dishInput,
   populateLegacyRestaurants,
   parseJson,
+  parseStringArray,
   restaurantInput,
   sendLegacy,
   uploadedImages
@@ -18,7 +19,9 @@ import Dish from '../models/dish.model.js';
 import User from '../models/user.model.js';
 import Review from '../models/review.model.js';
 import SavedItem from '../models/savedItem.model.js';
-import { prepareRestaurantSubmission, categorizeRestaurantImages, validateRestaurantLocation, validateSignatureDish } from '../utils/restaurantSubmission.js';
+import Promotion from '../models/promotion.model.js';
+import { recalculateRestaurantRating } from '../utils/recalculateRatings.js';
+import { prepareRestaurantSubmission, categorizeRestaurantImages, validateRestaurantLocation, validateSignatureDish, validateLeadImageIndex } from '../utils/restaurantSubmission.js';
 
 const getRestaurant = async (id) => {
   const restaurant = await Restaurant.findOne({ _id: id, status: { $ne: 'deleted' } }).populate('owner');
@@ -33,11 +36,14 @@ const withDishes = async (restaurant) => {
 
 const saveRestaurantImages = async (req, restaurantId) => {
   if (req.files?.length || req.body.existingImages !== undefined) {
-    const images = await uploadedImages(req.files, `restaurants/${restaurantId}`, req.body.existingImages);
+    const count = parseStringArray(req.body.existingImages).length + (req.files?.length || 0);
+    categorizeRestaurantImages(req.body, Array.from({ length: count }, () => ({})));
+    validateLeadImageIndex(req.body.leadImageIndex, count);
+    const existing = await Restaurant.findById(restaurantId).select('gallery');
+    const images = await uploadedImages(req.files, `restaurants/${restaurantId}`, req.body.existingImages, existing?.gallery || []);
+    if (images.length > 10) throw new ApiError(400, 'Maximal 10 Restaurantfotos.');
     if (req.body.photoCategories === undefined) {
-      const existing = await Restaurant.findById(restaurantId).select('gallery');
-      const byUrl = new Map((existing?.gallery || []).map((image) => [image.secure_url, image]));
-      return images.map((image) => byUrl.get(image.secure_url)?.toObject() || image);
+      return images;
     }
     return categorizeRestaurantImages(req.body, images);
   }
@@ -73,12 +79,14 @@ export const legacyGetOwnerRestaurant = catchAsync(async (req, res) => {
 });
 
 export const legacyCreateOwnerRestaurant = catchAsync(async (req, res) => {
+  delete req.body.showTeamReviews;
   if (await Restaurant.exists({ owner: req.user._id, status: { $ne: 'deleted' } })) {
     throw new ApiError(StatusCodes.CONFLICT, 'Restaurant already exists for this owner');
   }
   const restaurant = new Restaurant({ ...restaurantInput(req.body), owner: req.user._id, status: 'pending' });
   const submission = await prepareRestaurantSubmission(req, restaurant._id);
   restaurant.gallery = submission.gallery;
+  restaurant.leadImage = restaurant.gallery[Number(req.body.leadImageIndex) || 0]?.secure_url || '';
   restaurant.price = Math.min(...submission.dishes.map((dish) => dish.price));
   try {
     await restaurant.save();
@@ -93,12 +101,15 @@ export const legacyCreateOwnerRestaurant = catchAsync(async (req, res) => {
 });
 
 export const legacyResubmitOwnerRestaurant = catchAsync(async (req, res) => {
+  if (req.user.role !== 'admin') delete req.body.showTeamReviews;
   validateRestaurantLocation(req.body);
   const restaurant = await getRestaurant(req.params.id);
   assertOwnerOrAdmin(req.user, restaurant);
   Object.assign(restaurant, restaurantInput(req.body));
   const images = await saveRestaurantImages(req, restaurant._id);
   if (images) restaurant.gallery = images;
+  validateLeadImageIndex(req.body.leadImageIndex, restaurant.gallery.length);
+  if (req.body.leadImageIndex !== undefined) restaurant.leadImage = restaurant.gallery[Number(req.body.leadImageIndex)]?.secure_url || '';
   restaurant.status = 'pending';
   restaurant.rejectionReason = undefined;
   await restaurant.save();
@@ -127,18 +138,22 @@ export const legacyCreateAdminRestaurant = catchAsync(async (req, res) => {
   }
   const restaurant = new Restaurant({ ...restaurantInput(req.body), owner: owner._id, status: 'active' });
   restaurant.gallery = await saveRestaurantImages(req, restaurant._id) || [];
+  restaurant.leadImage = restaurant.gallery[Number(req.body.leadImageIndex) || 0]?.secure_url || '';
   await restaurant.save();
   await restaurant.populate('owner');
   sendLegacy(res, { restaurant: await withDishes(restaurant) }, StatusCodes.CREATED, 'Restaurant created');
 });
 
 export const legacyUpdateRestaurant = catchAsync(async (req, res) => {
+  if (req.user.role !== 'admin') delete req.body.showTeamReviews;
   if (req.body.location !== undefined) validateRestaurantLocation(req.body);
   const restaurant = await getRestaurant(req.params.id);
   assertOwnerOrAdmin(req.user, restaurant);
   Object.assign(restaurant, restaurantInput(req.body));
   const images = await saveRestaurantImages(req, restaurant._id);
   if (images) restaurant.gallery = images;
+  validateLeadImageIndex(req.body.leadImageIndex, restaurant.gallery.length);
+  if (req.body.leadImageIndex !== undefined) restaurant.leadImage = restaurant.gallery[Number(req.body.leadImageIndex)]?.secure_url || '';
   await restaurant.save();
   sendLegacy(res, { restaurant: await withDishes(restaurant) });
 });
@@ -166,7 +181,8 @@ export const legacyBulkDeleteRestaurants = catchAsync(async (req, res) => {
       Restaurant.findByIdAndUpdate(restaurant._id, { status: 'deleted', deletedAt: new Date() }),
       Dish.updateMany({ restaurant: restaurant._id }, { status: 'deleted', deletedAt: new Date() }),
       Review.updateMany({ restaurant: restaurant._id }, { status: 'deleted', deletedAt: new Date() }),
-      SavedItem.deleteMany({ restaurant: restaurant._id })
+      SavedItem.deleteMany({ restaurant: restaurant._id }),
+      Promotion.updateMany({ restaurant: restaurant._id }, { active: false })
     ]);
   }
   sendLegacy(res, { deletedCount: restaurants.length, skippedCount: ids.length - restaurants.length });
@@ -186,7 +202,12 @@ export const legacyAddDish = catchAsync(async (req, res) => {
   assertOwnerOrAdmin(req.user, restaurant);
   const dish = new Dish({ ...dishInput(req.body), restaurant: restaurant._id });
   await validateSignatureDish(Dish, restaurant._id, dish);
+  const imageCount = parseStringArray(req.body.existingImages).length + (req.files?.length || 0);
+  if (imageCount > 6) throw new ApiError(400, 'Maximal 6 Gerichtsfotos.');
+  validateLeadImageIndex(req.body.leadImageIndex, imageCount);
   dish.images = await uploadedImages(req.files, `restaurants/${restaurant._id}/dishes`, req.body.existingImages);
+  if (dish.images.length > 6) throw new ApiError(400, 'Maximal 6 Gerichtsfotos.');
+  dish.leadImage = dish.images[Number(req.body.leadImageIndex) || 0]?.secure_url || '';
   await dish.save();
   sendLegacy(res, { restaurant: await restaurantAfterDishMutation(restaurant) }, StatusCodes.CREATED, 'Dish created');
 });
@@ -198,9 +219,14 @@ export const legacyUpdateDish = catchAsync(async (req, res) => {
   if (!dish) throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
   await validateSignatureDish(Dish, restaurant._id, { ...dish.toObject(), ...dishInput(req.body) }, dish._id);
   Object.assign(dish, dishInput(req.body));
+  const imageCount = req.files?.length || req.body.existingImages !== undefined ? parseStringArray(req.body.existingImages).length + (req.files?.length || 0) : dish.images.length;
+  if (imageCount > 6) throw new ApiError(400, 'Maximal 6 Gerichtsfotos.');
+  validateLeadImageIndex(req.body.leadImageIndex, imageCount);
   if (req.files?.length || req.body.existingImages !== undefined) {
-    dish.images = await uploadedImages(req.files, `restaurants/${restaurant._id}/dishes`, req.body.existingImages);
+    dish.images = await uploadedImages(req.files, `restaurants/${restaurant._id}/dishes`, req.body.existingImages, dish.images);
   }
+  if (dish.images.length > 6) throw new ApiError(400, 'Maximal 6 Gerichtsfotos.');
+  if (req.body.leadImageIndex !== undefined) dish.leadImage = dish.images[Number(req.body.leadImageIndex)]?.secure_url || '';
   await dish.save();
   sendLegacy(res, { restaurant: await restaurantAfterDishMutation(restaurant) });
 });
@@ -216,7 +242,9 @@ export const legacyDeleteDish = catchAsync(async (req, res) => {
   if (!dish) throw new ApiError(StatusCodes.NOT_FOUND, 'Dish not found');
   await Promise.all([
     Review.updateMany({ dish: dish._id }, { status: 'deleted', deletedAt: new Date() }),
-    SavedItem.deleteMany({ dish: dish._id })
+    SavedItem.deleteMany({ dish: dish._id }),
+    Promotion.updateMany({ dish: dish._id }, { active: false })
   ]);
+  await recalculateRestaurantRating(restaurant._id);
   sendLegacy(res, { restaurant: await restaurantAfterDishMutation(restaurant) });
 });

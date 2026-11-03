@@ -50,12 +50,16 @@ const validOtp = async (code, hash, expiresAt) => {
 };
 
 export const legacyRegister = catchAsync(async (req, res) => {
-  const role = req.body.role === 'restaurant_owner' ? 'restaurant_owner' : req.body.role === 'admin' ? 'admin' : 'customer';
-  const email = req.body.email.toLowerCase();
+  if (req.body.role === 'admin') throw new ApiError(StatusCodes.FORBIDDEN, 'Administrator accounts cannot be registered publicly');
+  const role = req.body.role === 'restaurant_owner' ? 'restaurant_owner' : 'customer';
+  if (!req.body.email || !/^\S+@\S+\.\S+$/.test(req.body.email) || typeof req.body.password !== 'string' || req.body.password.length < 8 || !req.body.name?.trim()) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'Name, valid email and a password of at least 8 characters are required');
+  }
+  const email = req.body.email.trim().toLowerCase();
   let user = await User.findOne({ email }).select(selectSecrets());
 
   if (user) {
-    const passwordMatches = await bcrypt.compare(req.body.password, user.passwordHash);
+    const passwordMatches = user.passwordHash && await bcrypt.compare(req.body.password, user.passwordHash);
     if (user.status === 'deleted' || user.emailVerified || user.role !== role || !passwordMatches) {
       throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
     }
@@ -91,7 +95,7 @@ export const legacyRegister = catchAsync(async (req, res) => {
 
 export const legacyLogin = catchAsync(async (req, res) => {
   const user = await User.findOne({ email: req.body.email.toLowerCase() }).select('+passwordHash');
-  if (!user || !(await bcrypt.compare(req.body.password, user.passwordHash))) {
+  if (!user?.passwordHash || typeof req.body.password !== 'string' || !(await bcrypt.compare(req.body.password, user.passwordHash))) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid email or password');
   }
   if (['blocked', 'deleted'].includes(user.status)) {
@@ -165,7 +169,7 @@ export const legacyResetPassword = catchAsync(async (req, res) => {
 
 export const legacyChangePassword = catchAsync(async (req, res) => {
   const user = await User.findById(req.user._id).select('+passwordHash');
-  if (!(await bcrypt.compare(req.body.currentPassword, user.passwordHash))) {
+    if (!user.passwordHash || typeof req.body.currentPassword !== 'string' || !(await bcrypt.compare(req.body.currentPassword, user.passwordHash))) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Current password is incorrect');
   }
   user.passwordHash = await bcrypt.hash(req.body.newPassword, 12);

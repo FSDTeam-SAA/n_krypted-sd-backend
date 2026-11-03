@@ -4,6 +4,9 @@ import { protect, optionalAuth } from '../middlewares/auth.js';
 import { restrictTo } from '../middlewares/roles.js';
 import { deleteAccountCascade } from '../utils/accountDeletion.js';
 import catchAsync from '../utils/catchAsync.js';
+import { socialChallenge, socialLogin, appleCallback } from '../controllers/socialAuth.controller.js';
+import { uploadImage } from '../controllers/upload.controller.js';
+import { listEntries, saveEntry, readSettings, saveSettings, listPromotions, savePromotion, createTeamReview, moderateReview, recordView, ownerViews, saveSafety, googleGeocode } from '../controllers/features.controller.js';
 import { sendLegacy } from '../utils/legacyApi.js';
 import {
   legacyBulkDeleteUsers,
@@ -22,7 +25,6 @@ import {
 } from '../controllers/legacyAuth.controller.js';
 import {
   legacyAdminCheckIns,
-  legacyAppSettings,
   legacyBulkDeleteReviews,
   legacyCategories,
   legacyCreateCheckIn,
@@ -64,6 +66,24 @@ import {
 
 const router = Router();
 const adminOnly = [protect, restrictTo('admin')];
+router.get('/auth/social/challenge', socialChallenge);
+router.post('/auth/social', optionalAuth, socialLogin);
+router.post('/auth/apple/callback', appleCallback);
+router.get('/content/app-settings', readSettings);
+router.put('/content/app-settings', ...adminOnly, saveSettings);
+router.get('/admin/catalog', ...adminOnly, listEntries);
+router.post('/admin/catalog', ...adminOnly, saveEntry);
+router.put('/admin/catalog/:id', ...adminOnly, saveEntry);
+router.get('/admin/promotions', ...adminOnly, listPromotions);
+router.post('/admin/promotions/banner', ...adminOnly, upload.single('image'), uploadImage);
+router.post('/admin/promotions', ...adminOnly, savePromotion);
+router.put('/admin/promotions/:id', ...adminOnly, savePromotion);
+router.post('/admin/team-reviews', ...adminOnly, createTeamReview);
+router.patch('/admin/reviews/:id/status', ...adminOnly, moderateReview);
+router.put('/admin/restaurants/:id/safety', ...adminOnly, saveSafety);
+router.post('/restaurants/:id/views', optionalAuth, recordView);
+router.get('/owner/views', protect, restrictTo('restaurant_owner'), ownerViews);
+router.get('/maps/geocode', protect, googleGeocode);
 
 router.post('/auth/register', (req, res, next) => {
   const started = performance.now();
@@ -109,7 +129,7 @@ router.get('/check-ins/owner', protect, restrictTo('restaurant_owner'), legacyOw
 router.get('/check-ins/admin', ...adminOnly, legacyAdminCheckIns);
 router.get('/check-ins/user/:userId', ...adminOnly, legacyUserCheckIns);
 
-router.get('/reviews/deal/:dealId', legacyReviewsByDeal);
+router.get('/reviews/deal/:dealId', optionalAuth, legacyReviewsByDeal);
 router.get('/reviews/eligibility/:dealId', protect, legacyReviewEligibility);
 router.get('/reviews', optionalAuth, legacyListReviews);
 router.post('/reviews', protect, legacyCreateReview);
@@ -120,7 +140,6 @@ router.get('/review-restaurants', protect, restrictTo('admin', 'restaurant_owner
 
 router.get('/content/legal', legacyGetLegal);
 router.put('/content/legal', ...adminOnly, legacyUpdateLegal);
-router.get('/content/app-settings', legacyAppSettings);
 router.get('/dashboard/stats', protect, restrictTo('admin', 'restaurant_owner'), legacyDashboardStats);
 
 router.get('/manage/deals', protect, restrictTo('admin', 'restaurant_owner'), legacyManageRestaurants);

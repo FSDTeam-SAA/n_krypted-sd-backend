@@ -5,6 +5,7 @@ import RestaurantView from '../models/restaurantView.model.js';
 import Review from '../models/review.model.js';
 import SavedItem from '../models/savedItem.model.js';
 import User from '../models/user.model.js';
+import Promotion from '../models/promotion.model.js';
 import { recalculateDishRating, recalculateRestaurantRating } from './recalculateRatings.js';
 
 const uniqueIds = (values) => [...new Set(values.filter(Boolean).map((value) => value.toString()))];
@@ -93,6 +94,7 @@ export const deleteAccountCascade = async (userId) => {
         }),
         CheckIn.deleteMany({ restaurant: { $in: ownerRestaurantIds } }),
         RestaurantView.deleteMany({ restaurant: { $in: ownerRestaurantIds } })
+        ,Promotion.updateMany({ restaurant: { $in: ownerRestaurantIds } }, { active: false })
       ]);
     }
   }

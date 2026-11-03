@@ -9,10 +9,11 @@ import Review from '../models/review.model.js';
 import Restaurant from '../models/restaurant.model.js';
 import Dish from '../models/dish.model.js';
 import CheckIn from '../models/checkIn.model.js';
+import { publicReviewVisibility } from '../utils/reviewVisibility.js';
 
 export const listReviews = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filters = { status: 'active', deletedAt: { $exists: false } };
+  const filters = { status: 'active', deletedAt: { $exists: false }, ...await publicReviewVisibility() };
 
   if (req.query.restaurantId) filters.restaurant = req.query.restaurantId;
   if (req.query.dishId) filters.dish = req.query.dishId;

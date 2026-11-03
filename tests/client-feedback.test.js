@@ -162,3 +162,44 @@ test('check-in rejects missing/far GPS data and accepts a nearby customer', asyn
   expect(near.body.data.distanceMeters).toBeLessThan(100);
   expect(await mongoose.model('CheckIn').countDocuments()).toBe(1);
 });
+
+test('invalid gallery edits fail before any new Cloudinary uploads', async () => {
+  const previousUploads = upload.mock.calls.length;
+  const cap = await request(app).put(`/api/admin/restaurants/${restaurantId}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .field('existingImages', JSON.stringify(Array.from({ length: 10 }, (_, i) => `https://example.com/retained-${i}.png`)))
+    .attach('images', Buffer.from('extra'), { filename: 'extra.png', contentType: 'image/png' });
+  expect(cap.status).toBe(400);
+  const categories = await request(app).put(`/api/admin/restaurants/${restaurantId}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .field('photoCategories', JSON.stringify(['not-a-category']))
+    .attach('images', Buffer.from('wrong-category'), { filename: 'category.png', contentType: 'image/png' });
+  expect(categories.status).toBe(400);
+  const lead = await request(app).put(`/api/admin/restaurants/${restaurantId}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .field('leadImageIndex', '99')
+    .attach('images', Buffer.from('wrong-lead'), { filename: 'lead.png', contentType: 'image/png' });
+  expect(lead.status).toBe(400);
+  expect(upload.mock.calls.length).toBe(previousUploads);
+});
+
+test('retained categorized gallery and dish photos keep their original asset metadata', async () => {
+  const Restaurant = mongoose.model('Restaurant');
+  const Dish = mongoose.model('Dish');
+  await Restaurant.updateOne({ _id: restaurantId }, { gallery: [{ public_id: 'cloudinary/original-restaurant', secure_url: 'https://example.com/real-restaurant.png', category: 'interior', width: 1200, height: 900 }] });
+  const gallery = await request(app).put(`/api/admin/restaurants/${restaurantId}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .send({ existingImages: ['https://example.com/real-restaurant.png'], photoCategories: ['exterior'] });
+  expect(gallery.status).toBe(200);
+  const savedGallery = (await Restaurant.findById(restaurantId)).gallery[0];
+  expect(savedGallery.public_id).toBe('cloudinary/original-restaurant');
+  expect(savedGallery.width).toBe(1200);
+  expect(savedGallery.category).toBe('exterior');
+  const dish = await Dish.findOne({ restaurant: restaurantId });
+  const originalId = dish.images[0].public_id;
+  const dishResult = await request(app).put(`/api/restaurants/${restaurantId}/dishes/${dish._id}`)
+    .set('Authorization', `Bearer ${ownerToken}`)
+    .send({ existingImages: [dish.images[0].secure_url] });
+  expect(dishResult.status).toBe(200);
+  expect((await Dish.findById(dish._id)).images[0].public_id).toBe(originalId);
+});

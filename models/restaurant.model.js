@@ -22,6 +22,12 @@ const restaurantSchema = new mongoose.Schema(
     city: { type: String, trim: true },
     country: { type: String, trim: true },
     description: { type: String, trim: true },
+    leadImage: { type: String, default: '' },
+    timeZone: { type: String, default: 'Europe/Berlin' },
+    healthNotice: { type: String, default: '' },
+    safetyComment: { type: String, default: '' },
+    safetyDisclaimer: { type: String, default: '' },
+    showTeamReviews: { type: Boolean, default: true },
     price: { type: Number, default: 0, min: 0 },
     location: {
       type: pointSchema,

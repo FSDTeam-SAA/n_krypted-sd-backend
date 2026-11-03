@@ -1,5 +1,9 @@
 # Flutter and dashboard API audit
 
+For the added promotions, catalog, safety, Team Reviews, social login and Google
+Maps routes, see [`implementation-2026-11-02.md`](implementation-2026-11-02.md).
+The third-party map provider notes below describe the previous version.
+
 Both shipped clients resolve their backend base URL to `http://<host>:5000/api` by default. The backend therefore exposes the compatibility contract below at `/api` and keeps the newer API at `/api/v1`.
 
 ## Authentication and users

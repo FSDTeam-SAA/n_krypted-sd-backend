@@ -5,7 +5,7 @@ export const idParam = z.object({
 });
 
 export const slugParam = z.object({
-  slug: z.enum(['terms', 'privacy'])
+  slug: z.enum(['terms', 'privacy', 'impressum'])
 });
 
 export const imageAssetSchema = z.object({

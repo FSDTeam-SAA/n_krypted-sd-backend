@@ -90,13 +90,14 @@ const authPayload = async (user, message, statusCode = StatusCodes.OK, restauran
 
 export const register = catchAsync(async (req, res) => {
   const { name, email, password, role = 'customer', phone, restaurant: restaurantInput } = req.body;
+  if (role === 'admin') throw new ApiError(StatusCodes.FORBIDDEN, 'Administrator accounts cannot be registered publicly');
   const normalizedEmail = email.toLowerCase();
   let user = await User.findOne({ email: normalizedEmail }).select(
     '+passwordHash +emailVerificationOtpHash +emailVerificationOtpExpiresAt'
   );
 
   if (user) {
-    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    const passwordMatches = user.passwordHash && await bcrypt.compare(password, user.passwordHash);
     if (user.status === 'deleted' || user.emailVerified || user.role !== role || !passwordMatches) {
       throw new ApiError(StatusCodes.CONFLICT, 'An account with this email already exists');
     }
@@ -108,11 +109,6 @@ export const register = catchAsync(async (req, res) => {
     user.emailVerificationOtpHash = undefined;
     user.emailVerificationOtpExpiresAt = undefined;
     await user.save();
-  } else if (role === 'admin') {
-    const adminExists = await User.exists({ role: 'admin', status: { $ne: 'deleted' } });
-    if (adminExists) {
-      throw new ApiError(StatusCodes.FORBIDDEN, 'Admin registration is only available for the first admin account');
-    }
   }
 
   if (!user) {
@@ -147,7 +143,7 @@ export const login = catchAsync(async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email }).select('+passwordHash');
 
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+  if (!user?.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid email or password');
   }
 
@@ -301,7 +297,7 @@ export const changePassword = catchAsync(async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const user = await User.findById(req.user._id).select('+passwordHash');
 
-  if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+  if (!user.passwordHash || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Current password is incorrect');
   }
 

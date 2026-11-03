@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { cleanHtml } from '../utils/content.js';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
@@ -601,7 +602,7 @@ export const upsertAdminPage = catchAsync(async (req, res) => {
     {
       slug: req.params.slug,
       title: req.body.title,
-      content: req.body.content
+        content: cleanHtml(req.body.content)
     },
     { upsert: true, new: true, runValidators: true }
   );

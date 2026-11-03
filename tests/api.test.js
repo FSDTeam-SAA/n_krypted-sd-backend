@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+import User from '../models/user.model.js';
 import request from 'supertest';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 
@@ -39,16 +41,17 @@ describe('n_krypted MVP API', () => {
     expect(health.body.messageEn).toBe('n_krypted API is running');
   });
 
-  it('registers and signs in admin, owner, and customer accounts without signup OTP', async () => {
-    const admin = await request(app).post('/api/v1/auth/register').send({
+  it('signs in a provisioned admin and registers owner and customer accounts', async () => {
+    await User.create({ name: 'Admin User', email: 'admin@example.com', passwordHash: await bcrypt.hash('password123', 12), role: 'admin', emailVerified: true });
+    const admin = await request(app).post('/api/v1/auth/login').send({
       name: 'Admin User',
       email: 'admin@example.com',
       password: 'password123',
       role: 'admin'
     });
 
-    expect(admin.status).toBe(201);
-    expect(admin.body.messageEn).toBe('Registration successful');
+    expect(admin.status).toBe(200);
+    expect(admin.body.messageEn).toBe('Login successful');
     expect(admin.body.data.user.emailVerified).toBe(true);
     expect(admin.body.data.accessToken).toBeTruthy();
     expect(admin.body.data.refreshToken).toBeTruthy();
