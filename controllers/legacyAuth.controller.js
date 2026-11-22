@@ -2,12 +2,13 @@ import bcrypt from 'bcryptjs';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
-import { createAuthTokens, generateOtp, generateResetToken, hashValue } from '../utils/authTokens.js';
+import { createAuthTokens, generateOtp, generateResetToken, hashValue, reservePasswordResetOtpAttempt } from '../utils/authTokens.js';
 import { streamUpload, toImageAsset } from '../utils/cloudinaryUpload.js';
 import { sendOtpEmail } from '../utils/email.js';
 import { sendLegacy } from '../utils/legacyApi.js';
 import { legacyMeta, legacyUser } from '../utils/legacySerializers.js';
 import { getPagination } from '../utils/pagination.js';
+import { escapeRegex } from '../utils/content.js';
 import { deleteAccountCascade } from '../utils/accountDeletion.js';
 import User from '../models/user.model.js';
 import CheckIn from '../models/checkIn.model.js';
@@ -32,6 +33,7 @@ const setOtp = async (user, purpose) => {
   if (purpose === 'reset') {
     user.passwordResetOtpHash = hash;
     user.passwordResetOtpExpiresAt = expiresAt;
+    user.passwordResetOtpAttempts = 0;
   } else {
     user.emailVerificationOtpHash = hash;
     user.emailVerificationOtpExpiresAt = expiresAt;
@@ -46,7 +48,29 @@ const setOtp = async (user, purpose) => {
 };
 
 const validOtp = async (code, hash, expiresAt) => {
-  return Boolean(hash && expiresAt && expiresAt.getTime() > Date.now() && await bcrypt.compare(code, hash));
+  if (typeof code !== 'string' && typeof code !== 'number') return false;
+  return Boolean(hash && expiresAt && expiresAt.getTime() > Date.now() && await bcrypt.compare(String(code), hash));
+};
+
+// Each password-reset OTP check consumes one of a limited number of attempts.
+const validResetOtp = async (user, code) => {
+  const otpUser = await reservePasswordResetOtpAttempt(user._id);
+  return Boolean(otpUser) && validOtp(code, otpUser.passwordResetOtpHash, otpUser.passwordResetOtpExpiresAt);
+};
+
+const legacyEmail = (value) => {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'A valid email is required');
+  }
+  return value.toLowerCase();
+};
+
+const legacyNewPassword = (value) => {
+  // Same minimum as legacy registration.
+  if (typeof value !== 'string' || value.length < 8) {
+    throw new ApiError(StatusCodes.BAD_REQUEST, 'New password must be at least 8 characters');
+  }
+  return value;
 };
 
 export const legacyRegister = catchAsync(async (req, res) => {
@@ -94,7 +118,7 @@ export const legacyRegister = catchAsync(async (req, res) => {
 });
 
 export const legacyLogin = catchAsync(async (req, res) => {
-  const user = await User.findOne({ email: req.body.email.toLowerCase() }).select('+passwordHash');
+  const user = await User.findOne({ email: legacyEmail(req.body.email) }).select('+passwordHash');
   if (!user?.passwordHash || typeof req.body.password !== 'string' || !(await bcrypt.compare(req.body.password, user.passwordHash))) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid email or password');
   }
@@ -109,14 +133,14 @@ export const legacyLogin = catchAsync(async (req, res) => {
 });
 
 export const legacyForgotPassword = catchAsync(async (req, res) => {
-  const user = await User.findOne({ email: req.body.email.toLowerCase(), status: { $nin: ['blocked', 'deleted'] } }).select(selectSecrets());
+  const user = await User.findOne({ email: legacyEmail(req.body.email), status: { $nin: ['blocked', 'deleted'] } }).select(selectSecrets());
   const otp = user ? await setOtp(user, 'reset') : { emailSent: false };
   sendLegacy(res, { otp }, StatusCodes.OK, 'Password reset OTP sent');
 });
 
 export const legacyVerify = catchAsync(async (req, res) => {
   const code = req.body.code || req.body.otp;
-  const user = await User.findOne({ email: req.body.email.toLowerCase(), status: { $nin: ['blocked', 'deleted'] } }).select(selectSecrets());
+  const user = await User.findOne({ email: legacyEmail(req.body.email), status: { $nin: ['blocked', 'deleted'] } }).select(selectSecrets());
   if (!user) throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired verification code');
 
   if (!user.emailVerified) {
@@ -133,7 +157,7 @@ export const legacyVerify = catchAsync(async (req, res) => {
     return;
   }
 
-  if (!(await validOtp(code, user.passwordResetOtpHash, user.passwordResetOtpExpiresAt))) {
+  if (!(await validResetOtp(user, code))) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired verification code');
   }
   const resetToken = generateResetToken();
@@ -145,14 +169,14 @@ export const legacyVerify = catchAsync(async (req, res) => {
 
 export const legacyResetPassword = catchAsync(async (req, res) => {
   const token = req.body.token || req.body.resetToken;
-  const password = req.body.password || req.body.newPassword;
-  const user = await User.findOne({ email: req.body.email.toLowerCase(), status: { $nin: ['blocked', 'deleted'] } }).select(selectSecrets());
+  const password = legacyNewPassword(req.body.password || req.body.newPassword);
+  const user = await User.findOne({ email: legacyEmail(req.body.email), status: { $nin: ['blocked', 'deleted'] } }).select(selectSecrets());
   const resetTokenValid = Boolean(
     user?.passwordResetTokenHash &&
     user.passwordResetTokenExpiresAt?.getTime() > Date.now() &&
-    user.passwordResetTokenHash === hashValue(token || '')
+    user.passwordResetTokenHash === hashValue(String(token || ''))
   );
-  const otpValid = user ? await validOtp(token, user.passwordResetOtpHash, user.passwordResetOtpExpiresAt) : false;
+  const otpValid = user && !resetTokenValid ? await validResetOtp(user, token) : false;
   if (!user || (!resetTokenValid && !otpValid)) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired password reset token');
   }
@@ -172,7 +196,9 @@ export const legacyChangePassword = catchAsync(async (req, res) => {
     if (!user.passwordHash || typeof req.body.currentPassword !== 'string' || !(await bcrypt.compare(req.body.currentPassword, user.passwordHash))) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Current password is incorrect');
   }
-  user.passwordHash = await bcrypt.hash(req.body.newPassword, 12);
+  user.passwordHash = await bcrypt.hash(legacyNewPassword(req.body.newPassword), 12);
+  user.refreshTokenHash = undefined;
+  user.refreshTokenExpiresAt = undefined;
   await user.save();
   sendLegacy(res, {}, StatusCodes.OK, 'Password changed successfully');
 });
@@ -204,8 +230,8 @@ export const legacyListUsers = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filters = { role: 'customer', status: { $ne: 'deleted' } };
   if (req.query.search) filters.$or = [
-    { name: new RegExp(req.query.search, 'i') },
-    { email: new RegExp(req.query.search, 'i') }
+    { name: new RegExp(escapeRegex(req.query.search), 'i') },
+    { email: new RegExp(escapeRegex(req.query.search), 'i') }
   ];
   const [users, total] = await Promise.all([
     User.find(filters).sort({ createdAt: -1 }).skip(skip).limit(limit),
@@ -243,8 +269,8 @@ export const legacyListOwners = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filters = { role: 'restaurant_owner', status: { $ne: 'deleted' } };
   if (req.query.search) filters.$or = [
-    { name: new RegExp(req.query.search, 'i') },
-    { email: new RegExp(req.query.search, 'i') }
+    { name: new RegExp(escapeRegex(req.query.search), 'i') },
+    { email: new RegExp(escapeRegex(req.query.search), 'i') }
   ];
   const [owners, total] = await Promise.all([
     User.find(filters).sort({ createdAt: -1 }).skip(skip).limit(limit),

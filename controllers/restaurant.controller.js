@@ -3,14 +3,16 @@ import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
 import sendSuccess from '../utils/apiResponse.js';
 import { getPagination, getPaginationMeta } from '../utils/pagination.js';
+import { escapeRegex } from '../utils/content.js';
 import { addSavedFlags } from '../utils/savedFlags.js';
+import { isOpenNow } from '../utils/discovery.js';
 import Restaurant from '../models/restaurant.model.js';
 import Dish from '../models/dish.model.js';
 
 const activeRestaurantQuery = { status: 'active', deletedAt: { $exists: false } };
 const activeDishQuery = { status: 'active', deletedAt: { $exists: false } };
 
-const buildRestaurantFilters = (query) => {
+const buildRestaurantFilters = async (query) => {
   const filters = { ...activeRestaurantQuery };
 
   if (query.category) {
@@ -26,31 +28,23 @@ const buildRestaurantFilters = (query) => {
   }
 
   if (query.district) {
-    filters.address = new RegExp(query.district, 'i');
-  }
-
-  if (query.openNow === 'true') {
-    const now = new Date();
-    const day = now.toLocaleDateString('en-US', { weekday: 'long' });
-    const time = now.toTimeString().slice(0, 5);
-
-    filters.openingHours = {
-      $elemMatch: {
-        day,
-        closed: { $ne: true },
-        open: { $lte: time },
-        close: { $gte: time }
-      }
-    };
+    filters.address = new RegExp(escapeRegex(query.district), 'i');
   }
 
   if (query.search) {
-    const regex = new RegExp(query.search, 'i');
+    const regex = new RegExp(escapeRegex(query.search), 'i');
     filters.$or = [
       { name: regex },
       { address: regex },
       { categories: regex }
     ];
+  }
+
+  // Evaluate opening hours in each restaurant's own time zone (incl. overnight hours),
+  // matching the /api discovery behaviour instead of the server's local clock.
+  if (query.openNow === 'true') {
+    const candidates = await Restaurant.find(filters).select('_id openingHours opensAt timeZone').lean();
+    filters._id = { $in: candidates.filter((restaurant) => isOpenNow(restaurant)).map((restaurant) => restaurant._id) };
   }
 
   return filters;
@@ -68,7 +62,7 @@ const getSort = (sort) => {
 
 export const listRestaurants = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
-  const filters = buildRestaurantFilters(req.query);
+  const filters = await buildRestaurantFilters(req.query);
 
   const [restaurantDocs, total] = await Promise.all([
     Restaurant.find(filters)
@@ -92,7 +86,7 @@ export const listRestaurants = catchAsync(async (req, res) => {
 export const listNearbyRestaurants = catchAsync(async (req, res) => {
   const { lat, lng, radius = 5000 } = req.query;
   const { page, limit, skip } = getPagination(req.query);
-  const match = buildRestaurantFilters(req.query);
+  const match = await buildRestaurantFilters(req.query);
   delete match.location;
 
   const pipeline = [

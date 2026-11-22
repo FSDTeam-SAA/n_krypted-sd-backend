@@ -4,6 +4,7 @@ import catchAsync from '../utils/catchAsync.js';
 import { validateSignatureDish } from '../utils/restaurantSubmission.js';
 import sendSuccess from '../utils/apiResponse.js';
 import { getPagination, getPaginationMeta } from '../utils/pagination.js';
+import { escapeRegex } from '../utils/content.js';
 import { deleteCloudinaryImage, streamUpload, toImageAsset } from '../utils/cloudinaryUpload.js';
 import { recalculateDishRating, recalculateRestaurantRating } from '../utils/recalculateRatings.js';
 import Restaurant from '../models/restaurant.model.js';
@@ -190,7 +191,7 @@ export const listOwnerDishes = catchAsync(async (req, res) => {
 
   if (req.query.category) filters.category = req.query.category;
   if (req.query.search) {
-    const regex = new RegExp(req.query.search, 'i');
+    const regex = new RegExp(escapeRegex(req.query.search), 'i');
     filters.$or = [{ name: regex }, { description: regex }, { category: regex }];
   }
 
@@ -367,7 +368,7 @@ export const getOwnerRatingsSummary = catchAsync(async (req, res) => {
   const restaurant = await getOwnerRestaurantOrFail(req.user._id);
 
   const distribution = await Review.aggregate([
-    { $match: { restaurant: restaurant._id, status: 'active' } },
+    { $match: { restaurant: restaurant._id, status: 'active', reviewType: 'customer' } },
     { $group: { _id: '$rating', count: { $sum: 1 } } },
     { $sort: { _id: -1 } }
   ]);

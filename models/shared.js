@@ -44,6 +44,7 @@ export const stripPrivateFields = (doc, ret) => {
   delete ret.emailVerificationOtpExpiresAt;
   delete ret.passwordResetOtpHash;
   delete ret.passwordResetOtpExpiresAt;
+  delete ret.passwordResetOtpAttempts;
   delete ret.passwordResetTokenHash;
   delete ret.passwordResetTokenExpiresAt;
   delete ret.refreshTokenHash;

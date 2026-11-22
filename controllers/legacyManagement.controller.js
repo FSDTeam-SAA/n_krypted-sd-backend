@@ -14,6 +14,7 @@ import {
 } from '../utils/legacyApi.js';
 import { legacyMeta, legacyRestaurant } from '../utils/legacySerializers.js';
 import { getPagination } from '../utils/pagination.js';
+import { escapeRegex } from '../utils/content.js';
 import Restaurant from '../models/restaurant.model.js';
 import Dish from '../models/dish.model.js';
 import User from '../models/user.model.js';
@@ -56,7 +57,7 @@ export const legacyManageRestaurants = catchAsync(async (req, res) => {
   if (req.user.role === 'restaurant_owner') filters.owner = req.user._id;
   if (req.query.status === 'activate') filters.status = 'active';
   if (req.query.status === 'deactivate') filters.status = { $in: ['pending', 'inactive', 'blocked'] };
-  if (req.query.title) filters.name = new RegExp(req.query.title, 'i');
+  if (req.query.title) filters.name = new RegExp(escapeRegex(req.query.title), 'i');
   const [restaurants, total] = await Promise.all([
     Restaurant.find(filters).populate('owner').sort({ createdAt: -1 }).skip(skip).limit(limit),
     Restaurant.countDocuments(filters)

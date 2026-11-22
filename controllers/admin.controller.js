@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs';
-import { cleanHtml } from '../utils/content.js';
+import { cleanHtml, escapeRegex } from '../utils/content.js';
 import { StatusCodes } from 'http-status-codes';
 import ApiError from '../utils/ApiError.js';
 import catchAsync from '../utils/catchAsync.js';
@@ -23,7 +23,7 @@ import StaticPage from '../models/staticPage.model.js';
 
 const buildSearch = (fields, search) => {
   if (!search) return {};
-  const regex = new RegExp(search, 'i');
+  const regex = new RegExp(escapeRegex(search), 'i');
   return { $or: fields.map((field) => ({ [field]: regex })) };
 };
 
@@ -259,7 +259,7 @@ export const listAdminRestaurants = catchAsync(async (req, res) => {
   if (req.query.status) filters.status = req.query.status;
   if (req.query.category) filters.categories = req.query.category;
   if (req.query.priceRange) filters.priceRange = req.query.priceRange;
-  if (req.query.district) filters.address = new RegExp(req.query.district, 'i');
+  if (req.query.district) filters.address = new RegExp(escapeRegex(req.query.district), 'i');
 
   const [restaurants, total] = await Promise.all([
     Restaurant.find(filters)
@@ -323,10 +323,17 @@ export const updateAdminRestaurantStatus = catchAsync(async (req, res) => {
   }
 
   if (status === 'deleted') {
-    await Dish.updateMany(
-      { restaurant: restaurant._id, status: { $ne: 'deleted' } },
-      { status: 'deleted', deletedAt: new Date() }
-    );
+    await Promise.all([
+      Dish.updateMany(
+        { restaurant: restaurant._id, status: { $ne: 'deleted' } },
+        { status: 'deleted', deletedAt: new Date() }
+      ),
+      // Match legacy bulk deletion so reviews of a deleted restaurant leave public lists.
+      Review.updateMany(
+        { restaurant: restaurant._id, status: { $ne: 'deleted' } },
+        { status: 'deleted', deletedAt: new Date() }
+      )
+    ]);
   }
 
   sendSuccess(res, StatusCodes.OK, 'Restaurant status updated successfully', { restaurant });
@@ -344,10 +351,17 @@ export const deleteAdminRestaurant = catchAsync(async (req, res) => {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Restaurant not found');
   }
 
-  await Dish.updateMany(
-    { restaurant: restaurant._id, status: { $ne: 'deleted' } },
-    { status: 'deleted', deletedAt }
-  );
+  await Promise.all([
+    Dish.updateMany(
+      { restaurant: restaurant._id, status: { $ne: 'deleted' } },
+      { status: 'deleted', deletedAt }
+    ),
+    // Match legacy bulk deletion so reviews of a deleted restaurant leave public lists.
+    Review.updateMany(
+      { restaurant: restaurant._id, status: { $ne: 'deleted' } },
+      { status: 'deleted', deletedAt }
+    )
+  ]);
 
   sendSuccess(res, StatusCodes.OK, 'Restaurant deleted successfully');
 });

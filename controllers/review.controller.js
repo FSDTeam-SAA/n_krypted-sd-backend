@@ -76,6 +76,24 @@ export const createReview = catchAsync(async (req, res) => {
     throw new ApiError(StatusCodes.FORBIDDEN, 'Please check in before leaving a review');
   }
 
+  // Each check-in allows one non-deleted review per target (restaurant or dish).
+  const usedCheckIns = await Review.distinct('checkIn', {
+    user: req.user._id,
+    restaurant: restaurantId,
+    dish: dishId || null,
+    status: { $ne: 'deleted' },
+    checkIn: { $exists: true }
+  });
+  const checkIn = await CheckIn.findOne({
+    user: req.user._id,
+    restaurant: restaurantId,
+    _id: { $nin: usedCheckIns }
+  }).sort({ createdAt: -1 });
+
+  if (!checkIn) {
+    throw new ApiError(StatusCodes.CONFLICT, 'You have already reviewed this for this visit');
+  }
+
   const reviewImages = req.files?.length
     ? await Promise.all(
       req.files.map(async (file) => toImageAsset(await streamUpload(file.buffer, `reviews/${req.user._id}`)))
@@ -86,6 +104,7 @@ export const createReview = catchAsync(async (req, res) => {
     user: req.user._id,
     restaurant: restaurantId,
     dish: dishId,
+    checkIn: checkIn._id,
     reviewType: 'customer',
     rating,
     comment,

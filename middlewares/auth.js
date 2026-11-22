@@ -35,7 +35,11 @@ export const protect = async (req, res, next) => {
     req.user = user;
     next();
   } catch (error) {
-    next(error.name === 'JsonWebTokenError'
+    if (error.name === 'TokenExpiredError') {
+      next(new ApiError(StatusCodes.UNAUTHORIZED, 'Authentication token has expired'));
+      return;
+    }
+    next(['JsonWebTokenError', 'NotBeforeError'].includes(error.name)
       ? new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid authentication token')
       : error);
   }

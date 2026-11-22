@@ -32,6 +32,9 @@ export const cleanHtml = (value) =>
     allowedStyles: { "*": { "text-align": [/^(left|right|center|justify)$/] } },
     allowedSchemes: ["https", "http", "mailto", "tel"],
   });
+// Treats user search text literally inside RegExp filters (no regex injection/ReDoS).
+export const escapeRegex = (value = "") =>
+  String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 export const validate = (schema, value) => {
   const result = schema.safeParse(value);
   if (!result.success)

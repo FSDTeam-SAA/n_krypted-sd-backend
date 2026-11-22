@@ -110,6 +110,7 @@ export const deleteAccountCascade = async (userId) => {
         emailVerificationOtpExpiresAt: '',
         passwordResetOtpHash: '',
         passwordResetOtpExpiresAt: '',
+        passwordResetOtpAttempts: '',
         passwordResetTokenHash: '',
         passwordResetTokenExpiresAt: ''
       }

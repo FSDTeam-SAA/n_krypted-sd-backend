@@ -7,7 +7,9 @@ const globalErrorHandler = (err, req, res, next) => {
 
   if (err.name === 'MulterError') {
     statusCode = StatusCodes.BAD_REQUEST;
-    message = err.message;
+    message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Each image must be 5 MB or smaller'
+      : err.message;
   }
 
   if (err.http_code) {

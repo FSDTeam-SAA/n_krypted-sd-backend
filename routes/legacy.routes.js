@@ -2,6 +2,9 @@ import { Router } from 'express';
 import upload from '../middlewares/upload.js';
 import { protect, optionalAuth } from '../middlewares/auth.js';
 import { restrictTo } from '../middlewares/roles.js';
+import validate from '../middlewares/validate.js';
+import { logout, refreshToken } from '../controllers/auth.controller.js';
+import { refreshTokenSchema } from '../validations/auth.validation.js';
 import { deleteAccountCascade } from '../utils/accountDeletion.js';
 import catchAsync from '../utils/catchAsync.js';
 import { socialChallenge, socialLogin, appleCallback } from '../controllers/socialAuth.controller.js';
@@ -95,6 +98,9 @@ router.post('/auth/register', (req, res, next) => {
   next();
 }, legacyRegister);
 router.post('/auth/login', legacyLogin);
+// Same controller and response shape as /api/v1/auth/refresh-token.
+router.post('/auth/refresh-token', validate(refreshTokenSchema), refreshToken);
+router.post('/auth/logout', protect, logout);
 router.post('/auth/forgot-password', legacyForgotPassword);
 router.post('/auth/verify', legacyVerify);
 router.post('/auth/reset-password', legacyResetPassword);

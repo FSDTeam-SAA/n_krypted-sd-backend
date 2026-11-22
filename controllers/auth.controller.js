@@ -11,7 +11,8 @@ import {
   generateResetToken,
   getRefreshTokenSecret,
   hashValue,
-  parseDurationMs
+  parseDurationMs,
+  reservePasswordResetOtpAttempt
 } from '../utils/authTokens.js';
 import { streamUpload, toImageAsset } from '../utils/cloudinaryUpload.js';
 import { sendOtpEmail } from '../utils/email.js';
@@ -43,6 +44,7 @@ const issueOtp = async (user, purpose) => {
   if (purpose === 'password_reset') {
     user.passwordResetOtpHash = otpHash;
     user.passwordResetOtpExpiresAt = expiresAt;
+    user.passwordResetOtpAttempts = 0;
     user.passwordResetTokenHash = undefined;
     user.passwordResetTokenExpiresAt = undefined;
   } else {
@@ -219,8 +221,9 @@ export const forgotPassword = catchAsync(async (req, res) => {
 export const verifyPasswordResetOtp = catchAsync(async (req, res) => {
   const { email, otp } = req.body;
   const user = await getUserForOtp(email);
+  const otpUser = user && await reservePasswordResetOtpAttempt(user._id);
 
-  if (!user || !(await verifyOtpValue(otp, user.passwordResetOtpHash, user.passwordResetOtpExpiresAt))) {
+  if (!otpUser || !(await verifyOtpValue(otp, otpUser.passwordResetOtpHash, otpUser.passwordResetOtpExpiresAt))) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid or expired OTP');
   }
 

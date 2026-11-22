@@ -45,7 +45,8 @@ export const sendOtpEmail = async ({ to, otp, purpose }) => {
     return {
       sent: false,
       skipped: true,
-      ...(process.env.NODE_ENV !== 'production' && { devOtp: otp })
+      // Fail closed: only explicit local environments may echo the OTP back.
+      ...(['development', 'test'].includes(process.env.NODE_ENV) && { devOtp: otp })
     };
   }
 

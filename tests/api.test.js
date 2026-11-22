@@ -461,7 +461,28 @@ describe('n_krypted MVP API', () => {
   });
 
   it('keeps upload validation available without Cloudinary credentials', async () => {
-    const upload = await request(app).post('/api/v1/uploads').send();
+    const anonymousUpload = await request(app).post('/api/v1/uploads').send();
+    expect(anonymousUpload.status).toBe(401);
+
+    const anonymousDelete = await request(app).delete('/api/v1/uploads/restaurants%2Fany-image');
+    expect(anonymousDelete.status).toBe(401);
+
+    const uploader = await request(app).post('/api/v1/auth/register').send({
+      name: 'Upload Customer',
+      email: 'upload-customer@example.com',
+      password: 'password123'
+    });
+    const uploaderToken = uploader.body.data.accessToken;
+
+    const customerDelete = await request(app)
+      .delete('/api/v1/uploads?publicId=restaurants/any-image')
+      .set('Authorization', `Bearer ${uploaderToken}`);
+    expect(customerDelete.status).toBe(403);
+
+    const upload = await request(app)
+      .post('/api/v1/uploads')
+      .set('Authorization', `Bearer ${uploaderToken}`)
+      .send();
     expect(upload.status).toBe(400);
   });
 });

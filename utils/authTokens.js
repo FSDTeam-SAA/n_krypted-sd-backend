@@ -14,6 +14,22 @@ export const generateResetToken = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
+export const MAX_PASSWORD_RESET_OTP_ATTEMPTS = 5;
+
+// Atomically consumes one guess for the current reset OTP so parallel requests
+// cannot exceed the limit. Resolves to null once the OTP is missing or exhausted.
+export const reservePasswordResetOtpAttempt = (userId) => {
+  return User.findOneAndUpdate(
+    {
+      _id: userId,
+      passwordResetOtpHash: { $exists: true },
+      passwordResetOtpAttempts: { $not: { $gte: MAX_PASSWORD_RESET_OTP_ATTEMPTS } }
+    },
+    { $inc: { passwordResetOtpAttempts: 1 } },
+    { new: true }
+  ).select('+passwordResetOtpHash +passwordResetOtpExpiresAt');
+};
+
 export const parseDurationMs = (value, fallbackMs) => {
   if (!value) return fallbackMs;
   if (typeof value === 'number') return value;

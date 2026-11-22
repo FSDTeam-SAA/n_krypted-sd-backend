@@ -23,6 +23,7 @@ const userSchema = new mongoose.Schema(
     emailVerificationOtpExpiresAt: { type: Date, select: false },
     passwordResetOtpHash: { type: String, select: false },
     passwordResetOtpExpiresAt: { type: Date, select: false },
+    passwordResetOtpAttempts: { type: Number, select: false },
     passwordResetTokenHash: { type: String, select: false },
     passwordResetTokenExpiresAt: { type: Date, select: false },
     refreshTokenHash: { type: String, select: false },

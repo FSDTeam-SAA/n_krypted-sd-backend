@@ -73,7 +73,8 @@ export const legacyRestaurant = (value, dishes = []) => {
   const restaurant = plain(value) || {};
   const category = restaurant.categories?.[0];
   const status = restaurant.status === 'active' ? 'activate' : 'deactivate';
-  const approvalStatus = restaurant.status === 'active'
+  // An admin-deactivated restaurant stays approved; `status: 'deactivate'` carries the switch.
+  const approvalStatus = ['active', 'inactive'].includes(restaurant.status)
     ? 'approved'
     : restaurant.status === 'blocked' && restaurant.rejectionReason
       ? 'rejected'

@@ -22,14 +22,13 @@ import StaticPage from '../models/staticPage.model.js';
 import CatalogEntry from '../models/catalogEntry.model.js';
 import RestaurantView from '../models/restaurantView.model.js';
 import { isOpenNow, defaultTags } from '../utils/discovery.js';
-import { cleanHtml, validate } from '../utils/content.js';
+import { cleanHtml, escapeRegex, validate } from '../utils/content.js';
 import { publicReviewVisibility } from '../utils/reviewVisibility.js';
 import { z } from 'zod';
 
 const activeRestaurants = { status: 'active', deletedAt: { $exists: false } };
 const activeDishes = { status: 'active', deletedAt: { $exists: false } };
 
-const escapeRegex = (value = '') => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const discoveryQuery = z.object({
   title: z.string().max(300).optional(), search: z.string().max(300).optional(),
   category: z.string().max(120).optional(), cuisine: z.string().max(120).optional(),
@@ -224,7 +223,8 @@ export const legacyCreateCheckIn = catchAsync(async (req, res) => {
 
 const listCheckIns = async (req, filters) => {
   const { page, limit, skip } = getPagination(req.query);
-  if (req.query.restaurantId) filters.restaurant = req.query.restaurantId;
+  // Never let the query replace a caller-scoped restaurant (owner check-ins).
+  if (req.query.restaurantId && !filters.restaurant) filters.restaurant = req.query.restaurantId;
   if (req.query.from || req.query.to) {
     filters.createdAt = {};
     if (req.query.from) filters.createdAt.$gte = new Date(req.query.from);
@@ -267,12 +267,15 @@ const reviewQuery = async (req) => {
   return filters;
 };
 
+// Only administrators may see reviewer contact details; others get public profile fields.
+const reviewerFields = (req) => (req.user?.role === 'admin' ? undefined : 'name avatar');
+
 export const legacyListReviews = catchAsync(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
   const filters = await reviewQuery(req);
   const [reviews, total] = await Promise.all([
     Review.find(filters)
-      .populate('user')
+      .populate('user', reviewerFields(req))
       .populate('adminAuthor', 'name')
       .populate('restaurant')
       .populate('dish')
@@ -287,21 +290,53 @@ export const legacyListReviews = catchAsync(async (req, res) => {
 
 export const legacyReviewsByDeal = catchAsync(async (req, res) => {
   const reviews = await Review.find({ ...await reviewQuery(req), restaurant: req.params.dealId, status: 'active' })
-    .populate('user restaurant dish checkIn adminAuthor')
+    .populate('user', reviewerFields(req))
+    .populate('restaurant dish checkIn adminAuthor')
     .sort({ createdAt: -1 });
   sendLegacy(res, { reviews: reviews.map(legacyReview) });
 });
 
+// A check-in allows one non-deleted review per target (the restaurant itself or each dish).
+const reviewTargetKey = (dish) => (dish ? String(dish) : '');
+
 export const legacyReviewEligibility = catchAsync(async (req, res) => {
-  const checkIn = await CheckIn.findOne({ user: req.user._id, restaurant: req.params.dealId })
+  const checkIns = await CheckIn.find({ user: req.user._id, restaurant: req.params.dealId })
     .populate('restaurant')
     .sort({ createdAt: -1 });
-  const dishes = checkIn ? await Dish.find({ restaurant: req.params.dealId, ...activeDishes }) : [];
-  const checkInData = checkIn ? legacyCheckIn(checkIn, dishes) : null;
+  const dishes = checkIns.length ? await Dish.find({ restaurant: req.params.dealId, ...activeDishes }) : [];
+  const used = new Map();
+  if (checkIns.length) {
+    const reviews = await Review.find({
+      user: req.user._id,
+      checkIn: { $in: checkIns.map((item) => item._id) },
+      status: { $ne: 'deleted' }
+    }).select('checkIn dish');
+    reviews.forEach((review) => {
+      const key = String(review.checkIn);
+      used.set(key, new Set([...(used.get(key) || []), reviewTargetKey(review.dish)]));
+    });
+  }
+  // Offer the newest visit that still has an unreviewed target, listing only those dishes.
+  let checkIn = null;
+  let openDishes = [];
+  for (const candidate of checkIns) {
+    const reviewed = used.get(String(candidate._id)) || new Set();
+    const remaining = dishes.filter((dish) => !reviewed.has(reviewTargetKey(dish._id)));
+    if (!reviewed.has('') || remaining.length) {
+      checkIn = candidate;
+      openDishes = remaining;
+      break;
+    }
+  }
+  const checkInData = checkIn ? legacyCheckIn(checkIn, openDishes) : null;
   sendLegacy(res, {
     eligible: Boolean(checkIn),
     checkIn: checkInData,
-    message: checkIn ? 'You can review this restaurant' : 'Please check in before leaving a review'
+    message: checkIn
+      ? 'You can review this restaurant'
+      : checkIns.length
+        ? 'You have already reviewed this visit. Please check in again to leave another review'
+        : 'Please check in before leaving a review'
   });
 });
 
@@ -313,6 +348,9 @@ export const legacyCreateReview = catchAsync(async (req, res) => {
   if (!await Restaurant.exists({ _id: restaurantId, ...activeRestaurants })) throw new ApiError(404, 'Restaurant not found');
   const dishId = req.body.dishID || req.body.dishId;
   if (dishId && !await Dish.exists({ _id: dishId, restaurant: restaurantId, ...activeDishes })) throw new ApiError(400, 'Dish does not belong to restaurant');
+  if (await Review.exists({ user: req.user._id, checkIn: checkIn._id, dish: dishId || null, status: { $ne: 'deleted' } })) {
+    throw new ApiError(StatusCodes.CONFLICT, 'You have already reviewed this for this visit');
+  }
   const review = await Review.create({
     user: req.user._id,
     restaurant: restaurantId,

@@ -7,6 +7,8 @@ import Dish from "../models/dish.model.js";
 import Review from "../models/review.model.js";
 import Promotion from "../models/promotion.model.js";
 import RestaurantView from "../models/restaurantView.model.js";
+import CheckIn from "../models/checkIn.model.js";
+import jwt from "jsonwebtoken";
 import { createAuthTokens } from "../utils/authTokens.js";
 import { isOpenNow } from "../utils/discovery.js";
 import { recalculateReviewTargets } from "../utils/recalculateRatings.js";
@@ -619,4 +621,135 @@ test("bulk spam removal recalculates both rating targets and deleted reviews can
         .send({ ratings: 5 })
     ).status,
   ).toBe(404);
+});
+
+test("owner check-ins cannot be widened to another restaurant via restaurantId", async () => {
+  await CheckIn.create({ user: customer.user._id, restaurant: expensive._id, distanceMeters: 5 });
+  const response = await request(app)
+    .get("/api/check-ins/owner")
+    .query({ restaurantId: String(expensive._id) })
+    .set(auth(owner));
+  expect(response.status).toBe(200);
+  expect(response.body.data.every((row) => row.restaurantId._id === String(cheap._id))).toBe(true);
+});
+
+test("public review lists do not expose reviewer contact details", async () => {
+  const lists = [
+    (await request(app).get("/api/reviews")).body.data,
+    (await request(app).get(`/api/reviews/deal/${cheap._id}`)).body.reviews,
+  ];
+  const reviewers = lists.flat().map((review) => review.userID).filter((user) => typeof user === "object");
+  expect(reviewers.length).toBeGreaterThan(0);
+  expect(reviewers.every((user) => user.email === "" && user.phoneNumber === "")).toBe(true);
+});
+
+test("a check-in allows one review per target and eligibility reflects used visits", async () => {
+  const visit = await CheckIn.create({ user: customer.user._id, restaurant: cheap._id, distanceMeters: 5 });
+  const post = (extra = {}) =>
+    request(app)
+      .post("/api/reviews")
+      .set(auth(customer))
+      .send({ dealID: String(cheap._id), checkInID: String(visit._id), ratings: 4, reviewComment: "Visit", ...extra });
+  const first = await post();
+  expect(first.status).toBe(201);
+  const duplicate = await post();
+  expect(duplicate.status).toBe(409);
+  expect(duplicate.body.message).toBe("Sie haben dies für diesen Besuch bereits bewertet");
+  expect((await post({ dishID: String(dish._id) })).status).toBe(201);
+  expect((await post({ dishID: String(dish._id) })).status).toBe(409);
+  const eligibility = await request(app).get(`/api/reviews/eligibility/${cheap._id}`).set(auth(customer));
+  expect(eligibility.body.eligible).toBe(false);
+  // Deleting your own review frees that target again.
+  await request(app).delete(`/api/reviews/${first.body.review._id}`).set(auth(customer));
+  const reopened = await request(app).get(`/api/reviews/eligibility/${cheap._id}`).set(auth(customer));
+  expect(reopened.body.eligible).toBe(true);
+  expect(reopened.body.checkIn._id).toBe(String(visit._id));
+  expect(reopened.body.checkIn.restaurantId.dishes).toHaveLength(0);
+  expect((await post()).status).toBe(201);
+});
+
+test("password-reset OTP guesses are limited, non-string codes do not crash and devOtp fails closed", async () => {
+  const email = customer.user.email;
+  const forgot = await request(app).post("/api/auth/forgot-password").send({ email });
+  const otp = forgot.body.otp.devOtp;
+  expect(otp).toMatch(/^\d{6}$/);
+  const wrong = otp === "111111" ? "222222" : "111111";
+  expect((await request(app).post("/api/auth/verify").send({ email, code: Number(wrong) })).status).toBe(400);
+  for (let i = 0; i < 4; i++) {
+    expect((await request(app).post("/api/auth/verify").send({ email, code: wrong })).status).toBe(400);
+  }
+  expect((await request(app).post("/api/auth/verify").send({ email, code: otp })).status).toBe(400);
+  expect((await request(app).post("/api/auth/reset-password").send({ email, token: otp, password: "new-password-1" })).status).toBe(400);
+  const fresh = (await request(app).post("/api/auth/forgot-password").send({ email })).body.otp.devOtp;
+  expect((await request(app).post("/api/auth/verify").send({ email, code: fresh })).status).toBe(200);
+  expect((await request(app).post("/api/auth/reset-password").send({ email, token: fresh, password: "short" })).status).toBe(400);
+  expect((await request(app).post("/api/auth/login").send({})).status).toBe(400);
+  process.env.NODE_ENV = "staging";
+  try {
+    const hidden = await request(app).post("/api/auth/forgot-password").send({ email });
+    expect(hidden.status).toBe(200);
+    expect(hidden.body.otp).not.toHaveProperty("devOtp");
+  } finally {
+    process.env.NODE_ENV = "test";
+  }
+});
+
+test("expired access tokens return 401 and legacy refresh/logout routes rotate and revoke", async () => {
+  const expired = jwt.sign({ id: customer.user._id, type: "access" }, process.env.JWT_SECRET, { expiresIn: -10 });
+  const me = await request(app).get("/api/v1/auth/me").set("Authorization", `Bearer ${expired}`);
+  expect(me.status).toBe(401);
+  expect(me.body.messageEn).toBe("Authentication token has expired");
+  const { refreshToken } = await createAuthTokens(customer.user);
+  const refreshed = await request(app).post("/api/auth/refresh-token").send({ refreshToken });
+  expect(refreshed.status).toBe(200);
+  expect(refreshed.body.data.accessToken).toBeTruthy();
+  const session = `Bearer ${refreshed.body.data.accessToken}`;
+  expect((await request(app).post("/api/auth/logout").set("Authorization", session)).status).toBe(200);
+  expect((await request(app).post("/api/auth/refresh-token").send({ refreshToken: refreshed.body.data.refreshToken })).status).toBe(401);
+});
+
+test("regex characters in search text are treated literally", async () => {
+  expect((await request(app).get("/api/v1/restaurants").query({ search: "(", district: "[" })).status).toBe(200);
+  expect((await request(app).get("/api/manage/deals").query({ title: "(" }).set(auth(owner))).status).toBe(200);
+  expect((await request(app).get("/api/auth/all/user").query({ search: "(" }).set(auth(admin))).status).toBe(200);
+  expect((await request(app).get("/api/v1/admin/users").query({ search: "(" }).set(auth(admin))).status).toBe(200);
+});
+
+test("v1 open-now uses restaurant hours incl. all-day schedules; deactivated restaurants stay approved", async () => {
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const allDay = await Restaurant.create({
+    owner: admin.user._id,
+    name: "All day diner",
+    status: "active",
+    timeZone: "Europe/Berlin",
+    openingHours: days.map((day) => ({ day, open: "00:00", close: "00:00" })),
+  });
+  const open = await request(app).get("/api/v1/restaurants").query({ openNow: "true", limit: 100 });
+  expect(open.status).toBe(200);
+  expect(open.body.data.restaurants.map((r) => r._id)).toContain(String(allDay._id));
+  expect((await request(app).patch(`/api/deals/${allDay._id}/status`).set(auth(admin))).status).toBe(200);
+  const managed = await request(app).get(`/api/manage/deals/${allDay._id}`).set(auth(admin));
+  expect(managed.body.restaurant.status).toBe("deactivate");
+  expect(managed.body.restaurant.approvalStatus).toBe("approved");
+});
+
+test("owner rating distribution counts only customer reviews and v1 restaurant deletion hides its reviews", async () => {
+  const summary = await request(app).get("/api/v1/owner/ratings-summary").set(auth(owner));
+  expect(summary.status).toBe(200);
+  const counted = summary.body.data.ratings.reduce((sum, row) => sum + row.count, 0);
+  expect(counted).toBe(summary.body.data.total);
+  const doomed = await Restaurant.create({ owner: admin.user._id, name: "Closing soon", status: "active" });
+  const review = await Review.create({ user: customer.user._id, restaurant: doomed._id, rating: 5 });
+  expect((await request(app).delete(`/api/v1/admin/restaurants/${doomed._id}`).set(auth(admin))).status).toBe(200);
+  expect((await Review.findById(review._id)).status).toBe("deleted");
+});
+
+test("oversized uploads return a bilingual 400", async () => {
+  const response = await request(app)
+    .post("/api/v1/uploads")
+    .set(auth(admin))
+    .attach("image", Buffer.alloc(5 * 1024 * 1024 + 1), { filename: "big.jpg", contentType: "image/jpeg" });
+  expect(response.status).toBe(400);
+  expect(response.body.messageEn).toBe("Each image must be 5 MB or smaller");
+  expect(response.body.message).toBe("Jedes Bild darf höchstens 5 MB groß sein");
 });
